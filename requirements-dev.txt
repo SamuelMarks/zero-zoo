@@ -1,0 +1,6 @@
+pytest
+pytest-cov
+playwright
+tox
+tox-uv
+mypy
