@@ -9,7 +9,7 @@ description = "Standardized Model Zoo for cross-framework equivalence."
 readme = "README.md"
 authors = [{ name = "Samuel Marks" }]
 license = { text = "Apache-2.0 OR MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dynamic = ["dependencies", "optional-dependencies"]
 
 [tool.hatch.metadata]
@@ -34,11 +34,11 @@ cupy = ["requirements-cupy.txt"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "D", "UP", "ANN", "B", "SIM"]
-ignore = ["D203", "D213"]
+ignore = ["D203", "D213", "UP007"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

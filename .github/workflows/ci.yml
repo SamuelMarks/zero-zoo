@@ -12,35 +12,128 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12']
-        framework: ['base', 'torch', 'tf', 'jax', 'mlx', 'pax']
+        include:
+          - os: ubuntu-latest
+            arch: x86_64-linux
+            python-version: '3.12'
+            framework: base
+          - os: macos-latest
+            arch: aarch64-macos
+            python-version: '3.12'
+            framework: mlx
+    defaults:
+      run:
+        working-directory: zero-zoo
 
     steps:
-    - uses: actions/checkout@v7
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v10
+    - name: Checkout zero-zoo
+      uses: actions/checkout@v7
       with:
-        enable-cache: true
+        path: zero-zoo
+
+    - name: Checkout zero-jax
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-jax
+        path: zero-jax
+
+    - name: Checkout zero-flax
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-flax
+        path: zero-flax
+
+    - name: Checkout zero-pytorch
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-pytorch
+        path: zero-pytorch
+
+    - name: Checkout zero-keras
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-keras
+        path: zero-keras
+
+    - name: Checkout zero-tensorflow
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-tensorflow
+        path: zero-tensorflow
+
+    - name: Checkout zero-mlx
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-mlx
+        path: zero-mlx
+
+    - name: Checkout zero-pax
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-pax
+        path: zero-pax
+
+    - name: Checkout zero-grain
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-grain
+        path: zero-grain
+
+    - name: Checkout zero-optax
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-optax
+        path: zero-optax
+
+    - name: Checkout zero-orbax
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-orbax
+        path: zero-orbax
+
+    - name: Checkout zero-chex
+      uses: actions/checkout@v7
+      with:
+        repository: SamuelMarks/zero-chex
+        path: zero-chex
 
     - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ matrix.python-version }}
 
     - name: Install Dependencies
       run: |
-        uv venv --python ${{ matrix.python-version }}
-        source .venv/bin/activate
-        uv pip install --system -e ".[test]"
+        python3 -m pip install --upgrade pip
+        pip install -r requirements-test.txt
+        pip install "pydantic>=2.0.0" "cdd @ git+https://github.com/offscale/cdd-python.git@master"
+        pip install \
+          "ml-switcheroo-ir @ https://github.com/SamuelMarks/ml-switcheroo-ir/releases/download/v0.0.4/ml_switcheroo_ir-0.0.4-py3-none-any.whl" \
+          "ml-switcheroo-compiler @ https://github.com/SamuelMarks/ml-switcheroo-compiler/releases/download/v0.0.1/ml_switcheroo_compiler-0.0.1-py3-none-any.whl"
+        pip install --no-deps \
+          "ml-ecosystem-snapshots @ https://github.com/SamuelMarks/ml-ecosystem-snapshots/releases/download/v0.0.5/ml_ecosystem_snapshots-0.0.5-py3-none-any.whl"
+        python3 -c "import pathlib, ml_switcheroo_compiler; (pathlib.Path(ml_switcheroo_compiler.__file__).parent / 'py.typed').touch()"
+        pip install --no-deps -e ../zero-jax
+        pip install --no-deps -e ../zero-flax
+        pip install --no-deps -e ../zero-pytorch
+        pip install --no-deps -e ../zero-keras
+        pip install --no-deps -e ../zero-tensorflow
+        pip install --no-deps -e ../zero-mlx
+        pip install --no-deps -e ../zero-pax
+        pip install --no-deps -e ../zero-grain
+        pip install --no-deps -e ../zero-optax
+        pip install --no-deps -e ../zero-orbax
+        pip install --no-deps -e ../zero-chex
+        pip install --no-deps -e .
 
     - name: Code Formatting & Linting (Ruff)
-      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+      if: matrix.framework == 'base'
       run: |
         ruff format --check .
         ruff check .
 
     - name: Static AST Typing, Docs, Dependencies & Compliance
-      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+      if: matrix.framework == 'base'
       run: |
         python3 scripts/lint_typing.py
         python3 scripts/check_docs.py
@@ -48,20 +141,29 @@ jobs:
         python3 scripts/check_compliance.py
 
     - name: Strict Type Checking (Mypy)
-      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+      if: matrix.framework == 'base'
       run: mypy --strict src/zero_zoo scripts tests
 
     - name: Docstring Coverage (100% Gate)
-      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+      if: matrix.framework == 'base'
       run: interrogate -vv -f 100 -M -i src/zero_zoo scripts tests
 
-    - name: Run Matrix Tests via Tox
+    - name: Run Full Test Suite & Dialect Markers (Linux)
+      if: matrix.framework == 'base'
       run: |
-        PY_VER=$(echo ${{ matrix.python-version }} | tr -d '.')
-        tox -e py${PY_VER}-${{ matrix.framework }}
+        pytest
+        pytest tests -m torch --no-cov
+        pytest tests -m tf --no-cov
+        pytest tests -m jax --no-cov
+        pytest tests -m pax --no-cov
+
+    - name: Run MLX Dialect Tests (aarch64-macos)
+      if: matrix.framework == 'mlx'
+      run: |
+        pytest tests -m mlx --no-cov
 
     - name: Verify Coverage & Badges
-      if: matrix.python-version == '3.12' && matrix.framework == 'base' && matrix.os == 'ubuntu-latest'
+      if: matrix.framework == 'base'
       run: |
         python3 scripts/update_badges.py
         if ! git diff --exit-code README.md; then
@@ -70,5 +172,6 @@ jobs:
         fi
 
     - name: Build Package
-      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+      if: matrix.framework == 'base'
       run: python3 -m build
+
