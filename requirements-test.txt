@@ -1,6 +1,8 @@
 pytest
 pytest-cov
-playwright
+mypy
+ruff
+interrogate
+build
 tox
 tox-uv
-mypy

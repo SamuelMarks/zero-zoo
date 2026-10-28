@@ -1,0 +1,2 @@
+zero-tensorflow @ git+https://github.com/SamuelMarks/zero-tensorflow.git@master
+ml-switcheroo-compiler @ https://github.com/SamuelMarks/ml-switcheroo-compiler/releases/download/v0.0.1/ml_switcheroo_compiler-0.0.1-py3-none-any.whl

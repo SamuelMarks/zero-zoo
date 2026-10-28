@@ -1,9 +1,6 @@
-"""Tests for Qwen."""
+"""Tests for Qwen 3 architectures and weight serialization."""
 
-from typing import TYPE_CHECKING, TypeVar
-
-if TYPE_CHECKING:
-    pass
+from __future__ import annotations
 
 from zero_zoo.qwen import (
     get_qwen3_native,
@@ -13,11 +10,9 @@ from zero_zoo.qwen import (
     t_qwen3_inference,
 )
 
-T = TypeVar("T")
-
 
 def test_qwen() -> None:
-    """Test Qwen functions."""
+    """Test Qwen 3 native/zero models, checkpoint loading, inference, and edge cases."""
     assert get_qwen3_native()
     assert get_qwen3_zero()
     assert load_qwen3_weights()

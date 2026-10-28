@@ -1,16 +1,23 @@
-"""Tests for CNN models."""
+"""Tests for CNN models across all `zero-*` frameworks."""
 
-from typing import TYPE_CHECKING, TypeVar
-
-import numpy as np
-
-if TYPE_CHECKING:
-    import typing
-from unittest import mock
+from __future__ import annotations
 
 import pytest
+import zero_jax.numpy as jnp
+import zero_keras
+import zero_mlx as zmx
+import zero_tensorflow as ztf
+import zero_torch
+from zero_flax import nnx
+from zero_jax import random
+from zero_pax.praxis.layers import Conv2D as PaxConv2D
+from zero_pax.types import Tensor as PaxTensor
 
+from zero_zoo._types import as_jax
 from zero_zoo.cnn import (
+    ZeroPaxCNN,
+    get_flax_cnn,
+    get_keras_cnn,
     get_native_flax_linen_cnn,
     get_native_flax_nnx_cnn,
     get_native_jax_cnn,
@@ -18,6 +25,7 @@ from zero_zoo.cnn import (
     get_native_mlx_cnn,
     get_native_pax_cnn,
     get_native_pytorch_cnn,
+    get_pytorch_cnn,
     get_zero_flax_linen_cnn,
     get_zero_flax_nnx_cnn,
     get_zero_jax_cnn,
@@ -25,399 +33,159 @@ from zero_zoo.cnn import (
     get_zero_mlx_cnn,
     get_zero_pax_cnn,
     get_zero_pytorch_cnn,
+    get_zero_tensorflow_cnn,
 )
-
-T = TypeVar("T")
+from zero_zoo.matrix_runner import check_equivalence
 
 
 @pytest.mark.torch
-def test_pytorch_cnns() -> None:
-    """Test PyTorch CNNs."""
-    import torch
+def test_pytorch_cnn() -> None:
+    """Verify Zero PyTorch and reference PyTorch CNN forward passes."""
+    pt_native = get_native_pytorch_cnn()
+    pt_zero = get_zero_pytorch_cnn()
+    pt_alias = get_pytorch_cnn()
 
-    native_cnn = get_native_pytorch_cnn()
-    x = torch.randn(4, 1, 4, 4)
-    assert native_cnn(x).shape == (4, 2)
+    x = zero_torch.ones((4, 1, 4, 4))
+    out_native = pt_native(x)
+    out_zero = pt_zero(x)
+    out_alias = pt_alias(x)
 
-    with (
-        mock.patch("zero_torch.nn.Conv2d") as mock_conv,
-        mock.patch("zero_torch.nn.BatchNorm2d") as mock_bn,
-        mock.patch("zero_torch.nn.ReLU") as mock_relu,
-        mock.patch("zero_torch.nn.Flatten") as mock_flatten,
-        mock.patch("zero_torch.nn.Linear") as mock_lin,
-    ):
-        mock_conv.return_value.side_effect = lambda x: x
-        mock_bn.return_value.side_effect = lambda x: x
-        mock_relu.return_value.side_effect = lambda x: x
-        mock_flatten.return_value.side_effect = lambda x: x
-        mock_lin.return_value.side_effect = lambda x: x
-        zero_cnn = get_zero_pytorch_cnn()
-        assert zero_cnn(x) is not None
+    assert out_native.shape == (4, 2)
+    assert out_zero.shape == (4, 2)
+    assert out_alias.shape == (4, 2)
 
 
 @pytest.mark.tf
-def test_keras_cnns() -> None:
-    """Test Keras CNNs."""
-    import tensorflow as tf
+def test_keras_and_tensorflow_cnn() -> None:
+    """Verify Zero Keras and Zero TensorFlow CNN forward passes."""
+    k_native = get_native_keras_cnn()
+    k_zero = get_zero_keras_cnn()
+    k_alias = get_keras_cnn()
 
-    native_cnn = get_native_keras_cnn()
-    x = tf.random.normal((4, 4, 4, 1))
-    assert native_cnn(x).shape == (4, 2)
+    x_keras = zero_keras.ops.ones((4, 4, 4, 1))
+    out_k_native = k_native(x_keras)
+    out_k_zero = k_zero(x_keras)
+    out_k_alias = k_alias(x_keras)
 
-    with (
-        mock.patch("zero_keras.Input"),
-        mock.patch("zero_keras.layers.Conv2D") as mock_conv,
-        mock.patch("zero_keras.layers.BatchNormalization") as mock_bn,
-        mock.patch("zero_keras.layers.ReLU") as mock_relu,
-        mock.patch("zero_keras.layers.Flatten") as mock_flatten,
-        mock.patch("zero_keras.layers.Dense") as mock_dense,
-        mock.patch("zero_keras.Model") as mock_model,
-    ):
-        mock_conv.return_value.side_effect = lambda x: x
-        mock_bn.return_value.side_effect = lambda x: x
-        mock_relu.return_value.side_effect = lambda x: x
-        mock_flatten.return_value.side_effect = lambda x: x
-        mock_dense.return_value.side_effect = lambda x: x
-        mock_model.return_value = mock.MagicMock()
-        zero_cnn = get_zero_keras_cnn()
-        assert zero_cnn is not None
+    assert zero_keras.ops.shape(out_k_native) == (4, 2)
+    assert zero_keras.ops.shape(out_k_zero) == (4, 2)
+    assert zero_keras.ops.shape(out_k_alias) == (4, 2)
+
+    tf_cnn = get_zero_tensorflow_cnn()
+    x_tf = ztf.ones((4, 4, 4, 1))
+    out_tf = tf_cnn(x_tf)
+    assert out_tf.shape == (4, 2)
 
 
 @pytest.mark.jax
-def test_jax_cnns() -> None:
-    """Test pure JAX CNNs."""
-    import jax
+def test_jax_cnn() -> None:
+    """Verify Zero JAX and reference JAX CNN training and eval forward passes."""
+    init_native, fwd_native = get_native_jax_cnn()
+    init_zero, fwd_zero = get_zero_jax_cnn()
 
-    n_init, n_fwd = get_native_jax_cnn()
-    key = jax.random.PRNGKey(0)
-    n_params = n_init(key)
+    key = as_jax(random.PRNGKey(0))
+    params_native = init_native(key)
+    params_zero = init_zero(key)
 
-    x = jax.random.normal(key, (4, 4, 4, 1))
-    assert n_fwd(n_params, x).shape == (4, 2)
+    x = as_jax(jnp.ones((4, 4, 4, 1)))
+    out_train_native = fwd_native(params_native, x, is_training=True)
+    out_eval_native = fwd_native(params_native, x, is_training=False)
+    out_train_zero = fwd_zero(params_zero, x, is_training=True)
+    out_eval_zero = fwd_zero(params_zero, x, is_training=False)
 
-    with (
-        mock.patch("zero_jax.random.split") as m_split,
-        mock.patch("zero_jax.random.normal") as m_norm,
-        mock.patch("zero_jax.numpy.zeros") as m_zeros,
-        mock.patch("zero_jax.numpy.ones") as m_ones,
-        mock.patch("zero_jax.numpy.dot") as m_dot,
-        mock.patch("zero_jax.numpy.mean") as m_mean,
-        mock.patch("zero_jax.numpy.var") as m_var,
-        mock.patch("zero_jax.numpy.sqrt") as m_sqrt,
-        mock.patch("zero_jax.numpy.reshape") as m_reshape,
-        mock.patch("zero_jax.nn.relu") as m_relu,
-    ):
-        m_split.return_value = (1, 2)
-        m_norm.return_value = 1
-        m_zeros.return_value = 0
-        m_ones.return_value = 1
-        m_dot.return_value = x
-        m_mean.return_value = 0
-        m_var.return_value = 1
-        m_sqrt.return_value = 1
-        m_reshape.return_value = x
-        m_relu.return_value = x
-
-        z_init, z_fwd = get_zero_jax_cnn()
-        z_params = z_init(key)
-        assert z_fwd(z_params, x) is not None
+    assert out_train_native.shape == (4, 2)
+    assert out_eval_native.shape == (4, 2)
+    assert check_equivalence(out_train_native, out_train_zero)
+    assert check_equivalence(out_eval_native, out_eval_zero)
 
 
 @pytest.mark.jax
-def test_flax_cnns() -> None:
-    """Test Flax Linen and NNX CNNs."""
-    import jax
-    import jax.numpy as jnp
+def test_flax_cnn() -> None:
+    """Verify Zero Flax NNX and Linen-adapter CNN forward passes."""
+    flax_native = get_native_flax_linen_cnn()
+    flax_zero = get_zero_flax_linen_cnn()
+    flax_alias = get_flax_cnn()
 
-    # Linen
-    n_linen = get_native_flax_linen_cnn()
-    key = jax.random.PRNGKey(0)
-    x = jnp.ones((4, 4, 4, 1))
-    n_params = n_linen.init(key, x)
-    assert n_linen.apply(n_params, x, use_running_average=True).shape == (4, 2)  # type: ignore[union-attr]
+    x = as_jax(jnp.ones((4, 4, 4, 1)))
+    key = as_jax(random.PRNGKey(0))
+    params = flax_native.init(key, x)
+    out_apply = flax_native.apply(params, x, use_running_average=True)
+    out_direct = flax_zero(x, use_running_average=False)
+    out_alias = flax_alias(x, use_running_average=True)
 
-    with mock.patch("zero_flax.nnx.Module"), mock.patch("zero_flax.nnx.Param"):
-        z_linen = get_zero_flax_linen_cnn()
-        z_linen(x)
+    assert out_apply.shape == (4, 2)
+    assert out_direct.shape == (4, 2)
+    assert out_alias.shape == (4, 2)
 
-    # NNX
-    from flax import nnx
+    nnx_native_cls = get_native_flax_nnx_cnn()
+    nnx_zero_cls = get_zero_flax_nnx_cnn()
+    nnx_native = nnx_native_cls(rngs=nnx.Rngs(0))
+    nnx_zero = nnx_zero_cls(rngs=nnx.Rngs(0))
 
-    n_nnx = get_native_flax_nnx_cnn()
-    n_model = n_nnx(rngs=nnx.Rngs(0))  # type: ignore[operator]
-    assert n_model(x).shape == (4, 2)
-
-    with (
-        mock.patch("zero_flax.nnx.Conv") as mock_conv,
-        mock.patch("zero_flax.nnx.BatchNorm") as mock_bn,
-        mock.patch("zero_flax.nnx.Linear") as mock_lin,
-        mock.patch("zero_jax.nn.relu") as mock_relu,
-    ):
-
-        class MockLayer:
-            """A mock layer."""
-
-            def __call__(self, x: T) -> T:
-                """Call the mock layer.
-
-                Args:
-                    x: The input tensor.
-
-                Returns:
-                    The unmodified input tensor.
-                """
-                return x
-
-        mock_conv.return_value = MockLayer()
-        mock_bn.return_value = MockLayer()
-        mock_lin.return_value = MockLayer()
-        mock_relu.side_effect = lambda x: x
-        z_nnx_cnn = get_zero_flax_nnx_cnn()
-        z_model = z_nnx_cnn(rngs=None)  # type: ignore[operator]
-        assert z_model(x) is not None
+    out_nnx_native = nnx_native(x, use_running_average=False)
+    out_nnx_zero = nnx_zero(x, use_running_average=False)
+    assert out_nnx_native.shape == (4, 2)
+    assert check_equivalence(out_nnx_native, out_nnx_zero)
 
 
 @pytest.mark.mlx
-def test_mlx_cnns() -> None:
-    """Test MLX CNNs."""
-    import mlx.core as mx
+def test_mlx_cnn() -> None:
+    """Verify Zero MLX and reference MLX CNN forward passes."""
+    mlx_native = get_native_mlx_cnn()
+    mlx_zero = get_zero_mlx_cnn()
 
-    native_cnn = get_native_mlx_cnn()
-    x = mx.random.normal((4, 4, 4, 1))
-    assert native_cnn(x).shape == (4, 2)  # type: ignore[operator]
+    x = zmx.ones((4, 4, 4, 1))
+    out_native = mlx_native(x)
+    out_zero = mlx_zero(x)
 
-    with (
-        mock.patch("zero_mlx.nn.Conv2d") as mock_conv,
-        mock.patch("zero_mlx.nn.BatchNorm") as mock_bn,
-        mock.patch("zero_mlx.nn.Linear") as mock_lin,
-        mock.patch("zero_mlx.nn.relu") as mock_relu,
-    ):
-        mock_conv.return_value.side_effect = lambda x: x
-        mock_bn.return_value.side_effect = lambda x: x
-        mock_lin.return_value.side_effect = lambda x: x
-        mock_relu.side_effect = lambda x: x
-
-        zero_cnn = get_zero_mlx_cnn()
-        # MLX expects reshaping might fail on mock objects, let's mock it
-        x_mock = mock.MagicMock()
-        x_mock.reshape.return_value = x_mock
-        assert zero_cnn(x_mock) is not None  # type: ignore[operator]
+    assert out_native.shape == (4, 2)
+    assert out_zero.shape == (4, 2)
 
 
 @pytest.mark.pax
-def test_pax_cnns() -> None:
-    """Test Pax CNNs."""
-    native_cnn = get_native_pax_cnn()
-    x = np.ones((4, 4, 4, 1))
-    assert native_cnn(x).shape == (4, 2)
+def test_pax_cnn() -> None:
+    """Verify Zero Pax and reference Pax CNN forward passes including lazy setup."""
+    pax_native = get_native_pax_cnn()
+    pax_zero = get_zero_pax_cnn()
+    pax_lazy = ZeroPaxCNN()
 
-    with (
-        mock.patch("zero_pax.Conv2D") as mock_conv,
-        mock.patch("zero_pax.BatchNorm") as mock_bn,
-        mock.patch("zero_pax.ReLU") as mock_relu,
-        mock.patch("zero_pax.Linear") as mock_lin,
-    ):
-        mock_conv.return_value.side_effect = lambda x: x
-        mock_bn.return_value.side_effect = lambda x: x
-        mock_relu.return_value.side_effect = lambda x: x
-        mock_lin.return_value.side_effect = lambda x: x
+    x = PaxTensor([1.0] * 64, (4, 4, 4, 1))
+    out_native = pax_native(x)
+    out_zero = pax_zero(x)
+    out_lazy = pax_lazy(x)
 
-        zero_cnn = get_zero_pax_cnn()
-        x_mock = mock.MagicMock()
-        x_mock.reshape.return_value = x_mock
-        assert zero_cnn(x_mock) is not None
-
-
-@pytest.mark.jax
-def test_flax_cnns_linen_fallback() -> None:
-    """Test flax linen mock paths."""
-    from zero_zoo.cnn import get_zero_flax_linen_cnn
-
-    class MockNN:
-        """A mock for Flax linen neural network components."""
-
-        class Module:
-            """A mock base module."""
-
-            pass
-
-        @staticmethod
-        def compact(fn: T) -> T:
-            """A mock compact decorator.
-
-            Args:
-                fn: The function to decorate.
-
-            Returns:
-                The unmodified function.
-            """
-            return fn
-
-        @staticmethod
-        def Conv(
-            features: int, kernel_size: tuple[int, int]
-        ) -> "typing.Callable[[T], T]":
-            """Create a mock convolutional layer.
-
-            Args:
-                features: The number of features.
-                kernel_size: The size of the kernel.
-
-            Returns:
-                A callable representing the layer.
-            """
-            return lambda y: y
-
-        @staticmethod
-        def BatchNorm(use_running_average: bool = False) -> "typing.Callable[[T], T]":
-            """Create a mock batch normalization layer.
-
-            Args:
-                use_running_average: Whether to use running average.
-
-            Returns:
-                A callable representing the layer.
-            """
-            return lambda y: y
-
-        @staticmethod
-        def relu(x: T) -> T:
-            """Apply a mock ReLU activation.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The unmodified input tensor.
-            """
-            return x
-
-        @staticmethod
-        def Dense(features: int) -> "typing.Callable[[T], T]":
-            """Create a mock dense layer.
-
-            Args:
-                features: The number of features.
-
-            Returns:
-                A callable representing the layer.
-            """
-            return lambda y: y
-
-    with mock.patch.dict("sys.modules", {"zero_flax.linen": MockNN}):
-        linen_mock = get_zero_flax_linen_cnn()
-        x_mock = mock.MagicMock()
-        x_mock.reshape.return_value = x_mock
-        linen_mock(x_mock)
-
-    with mock.patch.dict("sys.modules", {"zero_flax.linen": None}):
-        fallback = get_zero_flax_linen_cnn()
-        fallback(np.ones((4, 2)))
-
-
-@pytest.mark.pax
-def test_pax_cnns_fallback() -> None:
-    """Test Pax cnns mock paths."""
-    from zero_zoo.cnn import get_native_pax_cnn
-
-    class MockBaseLayer:
-        """A mock base layer for Pax."""
-
-        def create_child(self, name: str, hparams: object) -> None:
-            """Create a child layer.
-
-            Args:
-                name: The name of the child.
-                hparams: The hyperparameters for the child.
-            """
-            setattr(self, name, lambda x: x)
-
-    class MockLayers:
-        """A collection of mock layers for Pax."""
-
-        class Conv2D:
-            """A mock 2D convolutional layer."""
-
-            @staticmethod
-            def HParams(input_dims: int, output_dims: int) -> None:
-                """Create hyperparameters for the layer.
-
-                Args:
-                    input_dims: The input dimensions.
-                    output_dims: The output dimensions.
-                """
-                pass
-
-        class Linear:
-            """A mock linear layer."""
-
-            @staticmethod
-            def HParams(input_dims: int, output_dims: int) -> None:
-                """Create hyperparameters for the layer.
-
-                Args:
-                    input_dims: The input dimensions.
-                    output_dims: The output dimensions.
-                """
-                pass
-
-        class BatchNorm:
-            """A mock batch normalization layer."""
-
-            @staticmethod
-            def HParams(dim: int) -> None:
-                """Create hyperparameters for the layer.
-
-                Args:
-                    dim: The feature dimension.
-                """
-                pass
-
-        class Activation:
-            """A mock activation layer."""
-
-            @staticmethod
-            def HParams(activation_name: str) -> None:
-                """Create hyperparameters for the layer.
-
-                Args:
-                    activation_name: The name of the activation function.
-                """
-                pass
-
-    mock_base_layer_mod = mock.MagicMock()
-    mock_base_layer_mod.BaseLayer = MockBaseLayer
-    mock_praxis = mock.MagicMock()
-    mock_praxis.base_layer = mock_base_layer_mod
-    mock_praxis.layers = MockLayers
-
-    with mock.patch.dict(
-        "sys.modules",
-        {
-            "praxis": mock_praxis,
-            "praxis.base_layer": mock_base_layer_mod,
-            "praxis.layers": MockLayers,
-        },
-    ):
-        pax_mock = get_native_pax_cnn()
-        pax_mock.setup()
-        x_mock = mock.MagicMock()
-        x_mock.reshape.return_value = x_mock
-        pax_mock(x_mock)
-
-
-def test_cnn_matrix_backends() -> None:
-    """Test CNN on matrix backends."""
-    backends = ["numpy", "jax", "mlx", "cupy", "dusk", "torch"]
-    for backend in backends:
-        assert backend in backends
+    assert out_native.shape == (4, 2)
+    assert out_zero.shape == (4, 2)
+    assert out_lazy.shape == (4, 2)
+    assert check_equivalence(out_native, out_zero)
 
 
 def test_cnn_edge_cases() -> None:
-    """Test CNN edge cases."""
-    asymmetric_padding = True
-    one_by_one_conv = True
-    fractional_strides = True
-    assert asymmetric_padding
-    assert one_by_one_conv
-    assert fractional_strides
+    """Verify CNN edge cases: `1x1`, strided, and transposed convolutions."""
+    rngs = nnx.Rngs(0)
+    conv_1x1 = nnx.Conv(1, 3, kernel_size=(1, 1), rngs=rngs)
+    conv_strided = nnx.Conv(1, 2, kernel_size=(2, 2), strides=(2, 2), rngs=rngs)
+    conv_transpose = nnx.ConvTranspose(
+        2,
+        1,
+        kernel_size=(2, 2),
+        strides=(2, 2),
+        rngs=rngs,
+    )
+
+    x = as_jax(jnp.ones((2, 4, 4, 1)))
+    out_1x1 = conv_1x1(x)
+    out_strided = conv_strided(x)
+    out_transposed = conv_transpose(out_strided)
+
+    assert out_1x1.shape == (2, 4, 4, 3)
+    assert out_strided.shape == (2, 2, 2, 2)
+    assert out_transposed.shape == (2, 4, 4, 1)
+
+    pax_valid_conv = PaxConv2D(
+        filter_shape=(1, 1, 1, 2),
+        filter_stride=(1, 1),
+        padding="VALID",
+    )
+    pax_out = pax_valid_conv(PaxTensor([1.0] * 32, (2, 4, 4, 1)))
+    assert pax_out.shape == (2, 4, 4, 2)

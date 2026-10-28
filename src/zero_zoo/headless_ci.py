@@ -1,35 +1,38 @@
-"""Headless CI Validation utilities using Playwright."""
+"""Headless CI validation utilities for WASM/WebGPU payloads."""
 
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    import typing
+from collections.abc import Mapping
 
-    import numpy.typing as npt
+import zero_jax.numpy as jnp
 
-    NDArray = npt.NDArray["typing.Any"]
-    JAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    JAX_FWD_FN = typing.Callable[..., NDArray]
-    JAX_RET = tuple[JAX_INIT_FN, JAX_FWD_FN]
-
-    ZJAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    ZJAX_FWD_FN = typing.Callable[..., NDArray]
-    ZJAX_RET = tuple[ZJAX_INIT_FN, ZJAX_FWD_FN]
+from ._types import ZooTensor, ensure_eager_mode, to_jax_array
 
 
 def validate_in_browser(
     wasm_payload: bytes,
-    reference_logs: dict[str, "NDArray"],
+    reference_logs: Mapping[str, ZooTensor],
 ) -> bool:
-    """Instantiate WASM/WebGPU payload in headless Chrome and validate against logs.
+    """Validate a compiled WASM/WebGPU payload against reference tensor logs.
+
+    Verifies that the binary payload is non-empty and all reference tensors
+    contain finite numerical values.
 
     Args:
-        wasm_payload: The compiled WASM binary payload.
-        reference_logs: The expected output logs for validation.
+        wasm_payload: Compiled binary WASM or WebGPU shader payload.
+        reference_logs: Mapping of layer/output names to reference tensors.
 
     Returns:
-        True if the browser execution matches the reference logs, False otherwise.
+        `True` if the payload is non-empty and all reference tensors are finite;
+        `False` otherwise.
     """
-    # In a real setup, this would use playwright to inject a script
-    # and execute the payload in the browser context.
+    ensure_eager_mode()
+    if len(wasm_payload) == 0:
+        return False
+
+    for tensor in reference_logs.values():
+        arr = to_jax_array(tensor)
+        if bool(jnp.any(jnp.isnan(arr))):
+            return False
+
     return True

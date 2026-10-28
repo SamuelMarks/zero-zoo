@@ -1,48 +1,38 @@
 """Tests for data generation utilities."""
 
-from typing import TYPE_CHECKING, TypeVar
-
-import numpy as np
-
-if TYPE_CHECKING:
-    pass
+from __future__ import annotations
 
 import pytest
+import zero_jax.numpy as jnp
 
+from zero_zoo._types import scalar_float
 from zero_zoo.data_gen import generate_random_tensor
-
-T = TypeVar("T")
-
-
-def test_generate_random_tensor_basic() -> None:
-    """Test basic tensor generation."""
-    t1 = generate_random_tensor((2, 2), seed=42, backend="numpy")
-    t2 = generate_random_tensor((2, 2), seed=42, backend="numpy")
-    assert np.allclose(t1, t2)
-    assert t1.shape == (2, 2)
 
 
 def test_generate_random_tensor_backends() -> None:
-    """Test backend validation."""
-    for backend in ["numpy", "jax", "mlx", "cupy", "dusk", "torch"]:
-        t = generate_random_tensor((2,), backend=backend)
-        assert t is not None
+    """Test tensor generation across all valid compiler backends."""
+    valid_backends = ["numpy", "jax", "mlx", "cupy", "dusk", "torch"]
+    for backend in valid_backends:
+        tensor = generate_random_tensor((2, 2), seed=42, backend=backend)
+        assert tensor.shape == (2, 2)
 
-    with pytest.raises(ValueError, match="Unsupported backend"):
-        generate_random_tensor((2,), backend="invalid_backend")
+    t1 = generate_random_tensor((2, 2), seed=42)
+    t2 = generate_random_tensor((2, 2), seed=42)
+    assert bool(jnp.allclose(t1, t2))
 
 
 def test_generate_random_tensor_edge_cases() -> None:
-    """Test edge cases: scalars, empty tensors, massive dimensionality."""
-    # Scalar (empty tuple shape)
-    scalar = generate_random_tensor(())
-    assert isinstance(scalar, float)
+    """Test edge cases in tensor generation (invalid backend, scalar, empty, high-D)."""
+    with pytest.raises(ValueError, match="Unsupported backend: invalid"):
+        generate_random_tensor((2, 2), backend="invalid")
 
-    # Empty Tensor (dimension of 0)
+    scalar = generate_random_tensor(())
+    assert scalar.shape == ()
+    assert isinstance(scalar_float(scalar), float)
+
     empty = generate_random_tensor((0, 5))
     assert empty.shape == (0, 5)
     assert empty.size == 0
 
-    # Massive dimensionality
     with pytest.raises(ValueError, match="Dimensionality exceeds safety limit of 10."):
         generate_random_tensor((2,) * 11)

@@ -1,65 +1,68 @@
-name: CI
+name: CI Matrix & Quality Gate
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ master ]
-
-permissions:
-  contents: write
+    branches: [ main, master ]
 
 jobs:
-  test_matrix:
-    runs-on: ubuntu-latest
+  test-matrix:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ['3.9', '3.10', '3.11', '3.12']
-        framework: ['base', 'torch', 'tf', 'jax', 'mlx']
-        include:
-          - python-version: '3.9'
-            framework: 'pax'
-          - python-version: '3.10'
-            framework: 'pax'
-        exclude:
-          - python-version: '3.11'
-            framework: 'mlx' # Usually we just run MLX locally on macOS, but let's allow it if there's a linux stub, otherwise we might exclude
-            # For this CI, we'll run what's available
-    
+        framework: ['base', 'torch', 'tf', 'jax', 'mlx', 'pax']
+
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
-    - name: Set up Python
-      uses: actions/setup-python@v6
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10
       with:
-        python-version: ${{ matrix.python-version }}
+        enable-cache: true
 
-    - name: Install dependencies & tox-uv
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
+    - name: Install Dependencies
       run: |
-        python3 -m pip install --upgrade pip
-        pip install tox tox-uv ruff mypy pytest pytest-cov build
-        
-    - name: Check Code Formatting & Docs/Types linting (Ruff)
+        uv venv --python ${{ matrix.python-version }}
+        source .venv/bin/activate
+        uv pip install --system -e ".[test]"
+
+    - name: Code Formatting & Linting (Ruff)
       if: matrix.python-version == '3.12' && matrix.framework == 'base'
       run: |
         ruff format --check .
         ruff check .
-        
+
+    - name: Static AST Typing, Docs, Dependencies & Compliance
+      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+      run: |
+        python3 scripts/lint_typing.py
+        python3 scripts/check_docs.py
+        python3 scripts/check_deps.py
+        python3 scripts/check_compliance.py
+
     - name: Strict Type Checking (Mypy)
       if: matrix.python-version == '3.12' && matrix.framework == 'base'
-      run: mypy .
+      run: mypy --strict src/zero_zoo scripts tests
 
-    - name: Run Test Matrix (Tox)
+    - name: Docstring Coverage (100% Gate)
+      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+      run: interrogate -vv -f 100 -M -i src/zero_zoo scripts tests
+
+    - name: Run Matrix Tests via Tox
       run: |
-        # Strip the period for tox format e.g., py310-torch
-        PY_VER=$(echo "${{ matrix.python-version }}" | tr -d '.')
+        PY_VER=$(echo ${{ matrix.python-version }} | tr -d '.')
         tox -e py${PY_VER}-${{ matrix.framework }}
 
-    - name: Verify 100% Coverage & Update Badges
-      if: matrix.python-version == '3.12' && matrix.framework == 'base'
+    - name: Verify Coverage & Badges
+      if: matrix.python-version == '3.12' && matrix.framework == 'base' && matrix.os == 'ubuntu-latest'
       run: |
-        # In a real setup, we'd combine coverage across matrix, but here's the check
         python3 scripts/update_badges.py
         if ! git diff --exit-code README.md; then
           echo "Coverage badges in README.md are out of date. Please run pre-commit or the update badges script locally and commit the changes."

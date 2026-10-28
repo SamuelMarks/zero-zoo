@@ -1,75 +1,68 @@
 """Matrix testing harness and equivalence checking utilities."""
 
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-import numpy as np
+from collections.abc import Sequence
 
-if TYPE_CHECKING:
-    import typing
+import zero_jax.numpy as jnp
 
-    import numpy.typing as npt
-
-    NDArray = npt.NDArray["typing.Any"]
-    JAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    JAX_FWD_FN = typing.Callable[..., NDArray]
-    JAX_RET = tuple[JAX_INIT_FN, JAX_FWD_FN]
-
-    ZJAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    ZJAX_FWD_FN = typing.Callable[..., NDArray]
-    ZJAX_RET = tuple[ZJAX_INIT_FN, ZJAX_FWD_FN]
+from ._types import JaxArray, ZooTensor, ensure_eager_mode, to_jax_array
+from .data_gen import generate_random_tensor
 
 
 def check_equivalence(
-    output_a: "NDArray", output_b: "NDArray", rtol: float = 1e-4, atol: float = 1e-4
+    output_a: ZooTensor | Sequence[float] | Sequence[Sequence[float]],
+    output_b: ZooTensor | Sequence[float] | Sequence[Sequence[float]],
+    rtol: float = 1e-4,
+    atol: float = 1e-4,
 ) -> bool:
-    """Check mathematical equivalence between two outputs.
+    """Check numerical equivalence between two tensors from any ecosystem backend.
 
-    Handles basic precision differences across backends and NaN parity.
+    Handles `NaN` and `Inf` propagation parity as well as shape mismatches.
 
     Args:
-        output_a: First output tensor (mocked as numpy array).
-        output_b: Second output tensor (mocked as numpy array).
-        rtol: Relative tolerance.
-        atol: Absolute tolerance.
+        output_a: First tensor or sequence to compare.
+        output_b: Second tensor or sequence to compare.
+        rtol: Relative tolerance for floating-point comparison.
+        atol: Absolute tolerance for floating-point comparison.
 
     Returns:
-        True if outputs are equivalent, False otherwise.
+        `True` if tensors have identical shapes, matching `NaN`/`Inf` positions,
+        and numerically close finite elements; `False` otherwise.
     """
-    a = np.asarray(output_a)
-    b = np.asarray(output_b)
+    ensure_eager_mode()
+    arr_a = to_jax_array(output_a)
+    arr_b = to_jax_array(output_b)
 
-    if a.shape != b.shape:
+    if arr_a.shape != arr_b.shape:
         return False
 
-    # Edge Case: Test NaN/Inf propagation parity
-    # If one has NaNs, the other MUST have NaNs in the exact same spots
-    if np.any(np.isnan(a)) or np.any(np.isnan(b)):
-        if not np.array_equal(np.isnan(a), np.isnan(b)):
-            return False
+    nan_a = jnp.isnan(arr_a)
+    nan_b = jnp.isnan(arr_b)
+    if not bool(jnp.array_equal(nan_a, nan_b)):
+        return False
 
-    if np.any(np.isinf(a)) or np.any(np.isinf(b)):
-        if not np.array_equal(np.isinf(a), np.isinf(b)):
-            return False
+    inf_a = jnp.isinf(arr_a)
+    inf_b = jnp.isinf(arr_b)
+    if not bool(jnp.array_equal(inf_a, inf_b)):
+        return False
 
-    # If both are entirely NaNs/Infs and parity matched above,
-    # they are "equivalent" in this context
-    if np.all(np.isnan(a)) or np.all(np.isinf(a)):
+    invalid_mask = jnp.logical_or(nan_a, inf_a)
+    if bool(jnp.all(invalid_mask)):
         return True
 
-    # Filter out NaNs for the allclose check (since NaN != NaN normally)
-    mask = ~(np.isnan(a) | np.isinf(a))
+    clean_a = jnp.where(invalid_mask, jnp.zeros_like(arr_a), arr_a)
+    clean_b = jnp.where(invalid_mask, jnp.zeros_like(arr_b), arr_b)
+    return bool(jnp.allclose(clean_a, clean_b, rtol=rtol, atol=atol))
 
-    return bool(np.allclose(a[mask], b[mask], rtol=rtol, atol=atol))
 
-
-def simulate_stateful_run(seed: int = 42) -> "NDArray":
+def simulate_stateful_run(seed: int = 42) -> JaxArray:
     """Simulate a stateful model run to verify random state isolation.
 
     Args:
-        seed: Random seed.
+        seed: Random seed for the isolated PRNG key.
 
     Returns:
-        A generated state array.
+        A deterministically generated `(5, 5)` `JaxArray` state matrix.
     """
-    rng = np.random.default_rng(seed)
-    return rng.random((5, 5))
+    return generate_random_tensor((5, 5), seed=seed)

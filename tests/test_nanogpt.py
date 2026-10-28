@@ -1,16 +1,23 @@
-"""Tests for NanoGPT models."""
+"""Tests for NanoGPT models across all `zero-*` frameworks."""
 
-from typing import TYPE_CHECKING, TypeVar
-
-import numpy as np
-
-if TYPE_CHECKING:
-    import typing
-from unittest import mock
+from __future__ import annotations
 
 import pytest
+import zero_chex
+import zero_jax.numpy as jnp
+import zero_keras
+import zero_mlx as zmx
+import zero_torch
+from zero_flax import nnx
+from zero_jax import random
+from zero_pax.types import Tensor as PaxTensor
 
+from zero_zoo._types import as_jax
+from zero_zoo.matrix_runner import check_equivalence
 from zero_zoo.nanogpt import (
+    ZeroPaxNanoGPT,
+    get_flax_nanogpt,
+    get_keras_nanogpt,
     get_native_flax_linen_nanogpt,
     get_native_flax_nnx_nanogpt,
     get_native_jax_nanogpt,
@@ -18,6 +25,7 @@ from zero_zoo.nanogpt import (
     get_native_mlx_nanogpt,
     get_native_pax_nanogpt,
     get_native_pytorch_nanogpt,
+    get_pytorch_nanogpt,
     get_zero_flax_linen_nanogpt,
     get_zero_flax_nnx_nanogpt,
     get_zero_jax_nanogpt,
@@ -27,629 +35,126 @@ from zero_zoo.nanogpt import (
     get_zero_pytorch_nanogpt,
 )
 
-T = TypeVar("T")
-
 
 @pytest.mark.torch
-def test_pytorch_nanogpts() -> None:
-    """Test PyTorch NanoGPTs."""
-    import torch
+def test_pytorch_nanogpt() -> None:
+    """Verify Zero PyTorch and reference PyTorch NanoGPT forward passes."""
+    pt_native = get_native_pytorch_nanogpt()
+    pt_zero = get_zero_pytorch_nanogpt()
+    pt_alias = get_pytorch_nanogpt()
 
-    native_nanogpt = get_native_pytorch_nanogpt()
-    x = torch.randint(0, 10, (4, 5))
-    assert native_nanogpt(x).shape == (4, 5, 10)
+    x = zero_torch.zeros((2, 5), dtype=zero_torch.int32)
+    out_native = pt_native(x)
+    out_zero = pt_zero(x)
+    out_alias = pt_alias(x)
 
-    with (
-        mock.patch("zero_torch.nn.Embedding") as mock_emb,
-        mock.patch("zero_torch.nn.MultiheadAttention") as mock_attn,
-        mock.patch("zero_torch.nn.LayerNorm") as mock_ln,
-        mock.patch("zero_torch.nn.Linear") as mock_lin,
-    ):
-
-        def mock_emb_fn(x: object) -> object:
-            """Mock embedding function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_attn_fn(x: object, y: object, z: object) -> tuple[object, None]:
-            """Mock attention function.
-
-            Args:
-                x: The query tensor.
-                y: The key tensor.
-                z: The value tensor.
-
-            Returns:
-                A tuple containing the output tensor and None.
-            """
-            return x, None
-
-        def mock_ln_fn(x: object) -> object:
-            """Mock layer normalization function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_lin_fn(x: object) -> object:
-            """Mock linear function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        mock_emb.return_value.side_effect = mock_emb_fn
-        mock_attn.return_value.side_effect = mock_attn_fn
-        mock_ln.return_value.side_effect = mock_ln_fn
-        mock_lin.return_value.side_effect = mock_lin_fn
-        zero_nanogpt = get_zero_pytorch_nanogpt()
-        assert zero_nanogpt(x) is not None
+    assert out_native.shape == (2, 5, 10)
+    assert out_zero.shape == (2, 5, 10)
+    assert out_alias.shape == (2, 5, 10)
 
 
 @pytest.mark.tf
-def test_keras_nanogpts() -> None:
-    """Test Keras NanoGPTs."""
-    import tensorflow as tf
+def test_keras_nanogpt() -> None:
+    """Verify Zero Keras and reference Keras NanoGPT forward passes."""
+    k_native = get_native_keras_nanogpt()
+    k_zero = get_zero_keras_nanogpt()
+    k_alias = get_keras_nanogpt()
 
-    native_nanogpt = get_native_keras_nanogpt()
-    x = tf.random.uniform((4, 5), maxval=10, dtype=tf.int32)
-    assert native_nanogpt(x).shape == (4, 5, 10)
+    x = zero_keras.ops.zeros((2, 5), dtype="int32")
+    out_native = k_native(x)
+    out_zero = k_zero(x)
+    out_alias = k_alias(x)
 
-    with (
-        mock.patch("zero_keras.Input"),
-        mock.patch("zero_keras.layers.Embedding") as mock_emb,
-        mock.patch("zero_keras.layers.MultiHeadAttention") as mock_attn,
-        mock.patch("zero_keras.layers.LayerNormalization") as mock_ln,
-        mock.patch("zero_keras.layers.Dense") as mock_dense,
-        mock.patch("zero_keras.Model") as mock_model,
-    ):
-
-        def mock_emb_fn(x: object) -> object:
-            """Mock embedding function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_attn_fn(x: object, y: object) -> object:
-            """Mock attention function.
-
-            Args:
-                x: The query tensor.
-                y: The key tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_ln_fn(x: object) -> object:
-            """Mock layer normalization function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_dense_fn(x: object) -> object:
-            """Mock dense function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        mock_emb.return_value.side_effect = mock_emb_fn
-        mock_attn.return_value.side_effect = mock_attn_fn
-        mock_ln.return_value.side_effect = mock_ln_fn
-        mock_dense.return_value.side_effect = mock_dense_fn
-        mock_model.return_value = mock.MagicMock()
-        zero_nanogpt = get_zero_keras_nanogpt()
-        assert zero_nanogpt is not None
+    assert zero_keras.ops.shape(out_native) == (2, 5, 10)
+    assert zero_keras.ops.shape(out_zero) == (2, 5, 10)
+    assert zero_keras.ops.shape(out_alias) == (2, 5, 10)
 
 
 @pytest.mark.jax
-def test_jax_nanogpts() -> None:
-    """Test pure JAX NanoGPTs."""
-    import jax
+def test_jax_nanogpt() -> None:
+    """Verify Zero JAX and reference JAX NanoGPT initialization and forward passes."""
+    init_native, fwd_native = get_native_jax_nanogpt()
+    init_zero, fwd_zero = get_zero_jax_nanogpt()
 
-    n_init, n_fwd = get_native_jax_nanogpt()
-    key = jax.random.PRNGKey(0)
-    n_params = n_init(key)
+    key = as_jax(random.PRNGKey(0))
+    params_native = init_native(key)
+    params_zero = init_zero(key)
 
-    x = jax.random.randint(key, (4, 5), 0, 10)
-    assert n_fwd(n_params, x).shape == (4, 5, 10)
+    x = as_jax(jnp.zeros((2, 5), dtype=jnp.int32))
+    out_train = fwd_native(params_native, x, is_training=True)
+    out_eval = fwd_zero(params_zero, x, is_training=False)
 
-    with (
-        mock.patch("zero_jax.random.split") as m_split,
-        mock.patch("zero_jax.random.normal") as m_norm,
-        mock.patch("zero_jax.numpy.zeros") as m_zeros,
-        mock.patch("zero_jax.numpy.dot") as m_dot,
-    ):
-        m_split.return_value = (1, 2)
-        m_norm.return_value = 1
-        m_zeros.return_value = 0
-        m_dot.return_value = x
-
-        z_init, z_fwd = get_zero_jax_nanogpt()
-        z_params = z_init(key)
-        # Mock params list access
-        z_params = {
-            "emb": mock.MagicMock(),
-            "w": mock.MagicMock(),
-            "b": mock.MagicMock(),
-        }
-        assert z_fwd(z_params, x) is not None
+    assert out_train.shape == (2, 5, 10)
+    assert out_eval.shape == (2, 5, 10)
+    assert check_equivalence(out_train, out_eval)
 
 
 @pytest.mark.jax
-def test_flax_nanogpts() -> None:
-    """Test Flax Linen and NNX NanoGPTs."""
-    import jax
+def test_flax_nanogpt() -> None:
+    """Verify Zero Flax NNX and Linen-adapter NanoGPT forward passes."""
+    flax_native = get_native_flax_linen_nanogpt()
+    flax_zero = get_zero_flax_linen_nanogpt()
+    flax_alias = get_flax_nanogpt()
 
-    # Linen
-    n_linen = get_native_flax_linen_nanogpt()
-    key = jax.random.PRNGKey(0)
-    x = jax.random.randint(key, (4, 5), 0, 10)
-    n_params = n_linen.init(key, x)
-    assert n_linen.apply(n_params, x, use_running_average=True).shape == (4, 5, 10)  # type: ignore[union-attr]
+    x = as_jax(jnp.zeros((2, 5), dtype=jnp.int32))
+    key = as_jax(random.PRNGKey(0))
+    params = flax_native.init(key, x)
+    out_apply = flax_native.apply(params, x, use_running_average=True)
+    out_direct = flax_zero(x, use_running_average=False)
+    out_alias = flax_alias(x, use_running_average=True)
 
-    with mock.patch("zero_flax.nnx.Module"), mock.patch("zero_flax.nnx.Param"):
-        z_linen = get_zero_flax_linen_nanogpt()
-        z_linen(x)
+    assert out_apply.shape == (2, 5, 10)
+    assert out_direct.shape == (2, 5, 10)
+    assert out_alias.shape == (2, 5, 10)
 
-    # NNX
-    from flax import nnx
+    nnx_native_cls = get_native_flax_nnx_nanogpt()
+    nnx_zero_cls = get_zero_flax_nnx_nanogpt()
+    nnx_native = nnx_native_cls(rngs=nnx.Rngs(0))
+    nnx_zero = nnx_zero_cls(rngs=nnx.Rngs(0))
 
-    n_nnx = get_native_flax_nnx_nanogpt()
-    n_model = n_nnx(rngs=nnx.Rngs(0))  # type: ignore[operator]
-    assert n_model(x).shape == (4, 5, 10)
-
-    with (
-        mock.patch("zero_flax.nnx.Embed") as mock_emb,
-        mock.patch("zero_flax.nnx.MultiHeadAttention") as mock_attn,
-        mock.patch("zero_flax.nnx.LayerNorm") as mock_ln,
-        mock.patch("zero_flax.nnx.Linear") as mock_lin,
-    ):
-
-        class MockLayer:
-            """Mock layer for testing NNX."""
-
-            def __call__(self, x: T, *args: object, **kwargs: object) -> T:
-                """Mock call method returning the input.
-
-                Args:
-                    x: The input tensor.
-                    *args: Variable length argument list.
-                    **kwargs: Arbitrary keyword arguments.
-
-                Returns:
-                    The unmodified input tensor.
-                """
-                return x
-
-        mock_emb.return_value = MockLayer()
-        mock_attn.return_value = MockLayer()
-        mock_ln.return_value = MockLayer()
-        mock_lin.return_value = MockLayer()
-
-        z_nnx_nanogpt = get_zero_flax_nnx_nanogpt()
-        z_model = z_nnx_nanogpt(rngs=None)  # type: ignore[operator]
-        assert z_model(x) is not None
+    out_nnx_native = nnx_native(x)
+    out_nnx_zero = nnx_zero(x)
+    assert out_nnx_native.shape == (2, 5, 10)
+    assert check_equivalence(out_nnx_native, out_nnx_zero)
 
 
 @pytest.mark.mlx
-def test_mlx_nanogpts() -> None:
-    """Test MLX NanoGPTs."""
-    import mlx.core as mx
+def test_mlx_nanogpt() -> None:
+    """Verify Zero MLX and reference MLX NanoGPT forward passes."""
+    mlx_native = get_native_mlx_nanogpt()
+    mlx_zero = get_zero_mlx_nanogpt()
 
-    native_nanogpt = get_native_mlx_nanogpt()
-    x = mx.random.randint(0, 10, (4, 5))
-    assert native_nanogpt(x).shape == (4, 5, 10)  # type: ignore[operator]
+    x = zmx.zeros((2, 5), dtype=zmx.int32)
+    out_native = mlx_native(x)
+    out_zero = mlx_zero(x)
 
-    with (
-        mock.patch("zero_mlx.nn.Embedding") as mock_emb,
-        mock.patch("zero_mlx.nn.MultiHeadAttention") as mock_attn,
-        mock.patch("zero_mlx.nn.LayerNorm") as mock_ln,
-        mock.patch("zero_mlx.nn.Linear") as mock_lin,
-    ):
-
-        def mock_emb_fn(x: object) -> object:
-            """Mock embedding function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_attn_fn(x: object, y: object, z: object, **kwargs: object) -> object:
-            """Mock attention function.
-
-            Args:
-                x: The query tensor.
-                y: The key tensor.
-                z: The value tensor.
-                **kwargs: Additional keyword arguments.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_ln_fn(x: object) -> object:
-            """Mock layer normalization function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_lin_fn(x: object) -> object:
-            """Mock linear function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        mock_emb.return_value.side_effect = mock_emb_fn
-        mock_attn.return_value.side_effect = mock_attn_fn
-        mock_ln.return_value.side_effect = mock_ln_fn
-        mock_lin.return_value.side_effect = mock_lin_fn
-
-        zero_nanogpt = get_zero_mlx_nanogpt()
-        assert zero_nanogpt(x) is not None  # type: ignore[operator]
+    assert out_native.shape == (2, 5, 10)
+    assert out_zero.shape == (2, 5, 10)
 
 
 @pytest.mark.pax
-def test_pax_nanogpts() -> None:
-    """Test Pax NanoGPTs."""
-    native_nanogpt = get_native_pax_nanogpt()
-    x = np.ones((4, 5), dtype=np.int32)
-    assert native_nanogpt(x).shape == (4, 5, 10)
-
-    with (
-        mock.patch("zero_pax.Embedding") as mock_emb,
-        mock.patch("zero_pax.MultiHeadAttention", create=True) as mock_attn,
-        mock.patch("zero_pax.LayerNorm") as mock_ln,
-        mock.patch("zero_pax.Linear") as mock_lin,
-    ):
-
-        def mock_emb_fn(x: object) -> object:
-            """Mock embedding function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_attn_fn(x: object, y: object, z: object, **kwargs: object) -> object:
-            """Mock attention function.
-
-            Args:
-                x: The query tensor.
-                y: The key tensor.
-                z: The value tensor.
-                **kwargs: Additional keyword arguments.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_ln_fn(x: object) -> object:
-            """Mock layer normalization function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        def mock_lin_fn(x: object) -> object:
-            """Mock linear function.
-
-            Args:
-                x: The input tensor.
-
-            Returns:
-                The input tensor.
-            """
-            return x
-
-        mock_emb.return_value.side_effect = mock_emb_fn
-        mock_attn.return_value.side_effect = mock_attn_fn
-        mock_ln.return_value.side_effect = mock_ln_fn
-        mock_lin.return_value.side_effect = mock_lin_fn
-
-        zero_nanogpt = get_zero_pax_nanogpt()
-        assert zero_nanogpt(x) is not None
-
-
-@pytest.mark.jax
-def test_flax_nanogpts_linen_fallback() -> None:
-    """Test flax linen mock paths."""
-    from zero_zoo.nanogpt import get_zero_flax_linen_nanogpt
-
-    class MockNN:
-        """Mock neural network module for Flax Linen."""
-
-        class Module:
-            """Mock base module for Flax Linen."""
-
-            pass
-
-        @staticmethod
-        def compact(fn: T) -> T:
-            """Mock compact decorator.
-
-            Args:
-                fn: The function to decorate.
-
-            Returns:
-                The unmodified input function.
-            """
-            return fn
-
-        @staticmethod
-        def Embed(num_embeddings: int, features: int) -> "typing.Callable[[T], T]":
-            """Mock embedding layer.
-
-            Args:
-                num_embeddings: The vocabulary size.
-                features: The embedding dimension.
-
-            Returns:
-                A mock embedding function.
-            """
-
-            def mock_embed(y: T) -> T:
-                """Mock embedding function.
-
-                Args:
-                    y: The input tensor.
-
-                Returns:
-                    The input tensor.
-                """
-                return y
-
-            return mock_embed
-
-        @staticmethod
-        def MultiHeadDotProductAttention(
-            num_heads: int,
-        ) -> "typing.Callable[[T, T], T]":
-            """Mock multi-head attention layer.
-
-            Args:
-                num_heads: The number of attention heads.
-
-            Returns:
-                A mock multi-head attention function.
-            """
-
-            def mock_attention(x: T, y: T) -> T:
-                """Mock attention function.
-
-                Args:
-                    x: The input tensor.
-                    y: The target tensor.
-
-                Returns:
-                    The input tensor.
-                """
-                return x
-
-            return mock_attention
-
-        @staticmethod
-        def LayerNorm() -> "typing.Callable[[T], T]":
-            """Mock layer normalization.
-
-            Returns:
-                A mock layer normalization function.
-            """
-
-            def mock_layernorm(y: T) -> T:
-                """Mock layer normalization function.
-
-                Args:
-                    y: The input tensor.
-
-                Returns:
-                    The input tensor.
-                """
-                return y
-
-            return mock_layernorm
-
-        @staticmethod
-        def Dense(features: int) -> "typing.Callable[[T], T]":
-            """Mock dense layer.
-
-            Args:
-                features: The number of output features.
-
-            Returns:
-                A mock dense layer function.
-            """
-
-            def mock_dense(y: T) -> T:
-                """Mock dense layer function.
-
-                Args:
-                    y: The input tensor.
-
-                Returns:
-                    The input tensor.
-                """
-                return y
-
-            return mock_dense
-
-    with mock.patch.dict("sys.modules", {"zero_flax.linen": MockNN}):
-        linen_mock = get_zero_flax_linen_nanogpt()
-        linen_mock(np.ones((4, 5)))
-
-    with mock.patch.dict("sys.modules", {"zero_flax.linen": None}):
-        fallback = get_zero_flax_linen_nanogpt()
-        fallback(np.ones((4, 2)))
-
-
-@pytest.mark.pax
-def test_pax_nanogpts_fallback() -> None:
-    """Test Pax nanogpts mock paths."""
-    from zero_zoo.nanogpt import get_native_pax_nanogpt
-
-    class MockBaseLayer:
-        """Mock base layer for Pax."""
-
-        def create_child(self, name: str, hparams: object) -> None:
-            """Mock child creation.
-
-            Args:
-                name: The name of the child layer.
-                hparams: The hyperparameters for the layer.
-            """
-
-            def mock_child(x: object, *args: object) -> object:
-                """Mock child layer call.
-
-                Args:
-                    x: The input tensor.
-                    *args: Additional arguments.
-
-                Returns:
-                    The input tensor.
-                """
-                return x
-
-            setattr(self, name, mock_child)
-
-    class MockLayers:
-        """Mock layers module for Pax."""
-
-        class Embedding:
-            """Mock embedding layer."""
-
-            @staticmethod
-            def HParams(vocab_size: int, embedding_dims: int) -> None:
-                """Mock hyperparameters.
-
-                Args:
-                    vocab_size: The vocabulary size.
-                    embedding_dims: The embedding dimension.
-                """
-                pass
-
-        class MultiHeadAttention:
-            """Mock multi-head attention layer."""
-
-            @staticmethod
-            def HParams(num_heads: int, dim_per_head: int) -> None:
-                """Mock hyperparameters.
-
-                Args:
-                    num_heads: The number of attention heads.
-                    dim_per_head: The dimension per head.
-                """
-                pass
-
-        class LayerNorm:
-            """Mock layer normalization."""
-
-            @staticmethod
-            def HParams(dim: int) -> None:
-                """Mock hyperparameters.
-
-                Args:
-                    dim: The dimension to normalize.
-                """
-                pass
-
-        class Linear:
-            """Mock linear layer."""
-
-            @staticmethod
-            def HParams(input_dims: int, output_dims: int) -> None:
-                """Mock hyperparameters.
-
-                Args:
-                    input_dims: The input dimension.
-                    output_dims: The output dimension.
-                """
-                pass
-
-    mock_base_layer_mod = mock.MagicMock()
-    mock_base_layer_mod.BaseLayer = MockBaseLayer
-    mock_praxis = mock.MagicMock()
-    mock_praxis.base_layer = mock_base_layer_mod
-    mock_praxis.layers = MockLayers
-
-    with mock.patch.dict(
-        "sys.modules",
-        {
-            "praxis": mock_praxis,
-            "praxis.base_layer": mock_base_layer_mod,
-            "praxis.layers": MockLayers,
-        },
-    ):
-        pax_mock = get_native_pax_nanogpt()
-        pax_mock.setup()
-        pax_mock(np.ones((4, 5)))
-
-
-def test_nanogpt_matrix_backends() -> None:
-    """Test NanoGPT on matrix backends."""
-    backends = ["numpy", "jax", "mlx", "cupy", "dusk", "torch"]
-    for backend in backends:
-        assert backend in backends
+def test_pax_nanogpt() -> None:
+    """Verify Zero Pax and reference Pax NanoGPT forward passes including lazy setup."""
+    pax_native = get_native_pax_nanogpt()
+    pax_zero = get_zero_pax_nanogpt()
+    pax_lazy = ZeroPaxNanoGPT()
+
+    x = PaxTensor([0.0] * 10, (2, 5))
+    out_native = pax_native(x)
+    out_zero = pax_zero(x)
+    out_lazy = pax_lazy(x)
+
+    assert out_native.shape == (2, 5, 10)
+    assert out_zero.shape == (2, 5, 10)
+    assert out_lazy.shape == (2, 5, 10)
+    assert check_equivalence(out_native, out_zero)
 
 
 def test_nanogpt_edge_cases() -> None:
-    """Test NanoGPT edge cases."""
-    attention_mask = True
-    seq_len = 1
-    gradient_overflow = False
-    assert attention_mask
-    assert seq_len == 1
-    assert not gradient_overflow
+    """Verify NanoGPT edge cases: `seq_len=1` and finite outputs."""
+    nnx_cls = get_zero_flax_nnx_nanogpt()
+    model = nnx_cls(rngs=nnx.Rngs(0))
+    single_token = as_jax(jnp.zeros((1, 1), dtype=jnp.int32))
+    out_single = model(single_token)
+    zero_chex.assert_tree_all_finite(out_single)
+    assert out_single.shape == (1, 1, 10)

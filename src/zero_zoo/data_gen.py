@@ -1,58 +1,57 @@
-"""Data generation utilities utilizing the compiler backends."""
+"""Data generation utilities utilizing the compiler and Zero JAX backends."""
 
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-import numpy as np
+import math
 
-if TYPE_CHECKING:
-    import typing
+import zero_jax.numpy as jnp
+from zero_jax import random
 
-    import numpy.typing as npt
-
-    NDArray = npt.NDArray["typing.Any"]
-    JAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    JAX_FWD_FN = typing.Callable[..., NDArray]
-    JAX_RET = tuple[JAX_INIT_FN, JAX_FWD_FN]
-
-    ZJAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    ZJAX_FWD_FN = typing.Callable[..., NDArray]
-    ZJAX_RET = tuple[ZJAX_INIT_FN, ZJAX_FWD_FN]
+from ._types import VALID_BACKENDS, JaxArray, as_jax, ensure_eager_mode, scalar_float
 
 
 def generate_random_tensor(
-    shape: tuple[int, ...], seed: int = 42, backend: str = "numpy"
-) -> "NDArray":
-    """Generate a deterministic random tensor for a specific backend.
+    shape: tuple[int, ...],
+    seed: int = 42,
+    backend: str = "numpy",
+) -> JaxArray:
+    """Generate a deterministic random tensor using the specified backend.
 
     Args:
-        shape: The shape of the tensor to generate. Can be empty for scalars.
-        seed: The deterministic seed.
-        backend: The string name of the backend (e.g., 'numpy', 'torch').
+        shape: Shape of the tensor to generate.
+        seed: Random seed for reproducibility.
+        backend: The target compiler backend name.
 
     Returns:
-        The generated random tensor.
-    """
-    if backend not in ["numpy", "jax", "mlx", "cupy", "dusk", "torch"]:
-        raise ValueError(f"Unsupported backend: {backend}")
+        Generated random tensor as a `JaxArray`.
 
-    # Edge Case: Massive Dimensionality Check
+    Raises:
+        ValueError: If `backend` is unsupported or if `len(shape)` exceeds 10.
+    """
+    ensure_eager_mode()
+    if backend not in VALID_BACKENDS:
+        raise ValueError(
+            f"Unsupported backend: {backend}. Must be one of {VALID_BACKENDS}"
+        )
+
     if len(shape) > 10:
         raise ValueError("Dimensionality exceeds safety limit of 10.")
 
-    # Note: In reality, this would call ml-switcheroo-compiler's backend ops.
-    # For now, we mock the generation logic using numpy since no other 3rd party
-    # dependencies are allowed without proper context,
-    # and we are validating the interface.
+    key = as_jax(random.PRNGKey(seed))
+    key_seed = int(scalar_float(key[1]))
 
-    rng = np.random.default_rng(seed)
-
-    # Edge Case: Scalar (empty shape)
     if len(shape) == 0:
-        val = rng.random()
-        return val  # type: ignore[return-value]
+        scalar_val = ((key_seed * 1103515245 + 12345) & 0x7FFFFFFF) / 2147483648.0
+        return as_jax(jnp.asarray(scalar_val))
 
-    # Edge Case: Empty Tensor (a dimension is 0)
     if any(dim == 0 for dim in shape):
-        return np.empty(shape)
+        return as_jax(jnp.zeros(shape))
 
-    return rng.random(shape)
+    total_elements = math.prod(shape)
+    state = key_seed & 0x7FFFFFFF
+    flat_vals: list[float] = []
+    for _ in range(total_elements):
+        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+        flat_vals.append(state / 2147483648.0)
+
+    return as_jax(jnp.reshape(jnp.asarray(flat_vals), shape))

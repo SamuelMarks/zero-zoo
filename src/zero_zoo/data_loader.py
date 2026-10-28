@@ -1,60 +1,111 @@
-"""Data loading utilities bridging zero-grain."""
+"""Data loading utilities bridging `zero-grain`."""
 
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-import numpy as np
+import zero_grain
+import zero_jax.numpy as jnp
 
-if TYPE_CHECKING:
-    import typing
+from ._types import JaxArray, as_jax, ensure_eager_mode, scalar_float
+from .data_gen import generate_random_tensor
 
-    import numpy.typing as npt
 
-    NDArray = npt.NDArray["typing.Any"]
-    JAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    JAX_FWD_FN = typing.Callable[..., NDArray]
-    JAX_RET = tuple[JAX_INIT_FN, JAX_FWD_FN]
+class SyntheticSequenceDataSource(
+    zero_grain.RandomAccessDataSource[dict[str, JaxArray]]
+):
+    """Deterministic in-memory data source backed by `zero_grain`.
 
-    ZJAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    ZJAX_FWD_FN = typing.Callable[..., NDArray]
-    ZJAX_RET = tuple[ZJAX_INIT_FN, ZJAX_FWD_FN]
+    Attributes:
+        dataset_size: Total number of items in the dataset.
+        seq_len: Sequence length for each generated input vector.
+        seed: Base random seed for deterministic sample generation.
+    """
+
+    def __init__(self, dataset_size: int, seq_len: int = 10, seed: int = 42) -> None:
+        """Initialize the synthetic sequence data source.
+
+        Args:
+            dataset_size: Total number of records in the dataset.
+            seq_len: Length of each sequence record.
+            seed: Random seed for deterministic generation.
+        """
+        self.dataset_size: int = dataset_size
+        self.seq_len: int = seq_len
+        self.seed: int = seed
+
+    def __len__(self) -> int:
+        """Return the number of records in the data source.
+
+        Returns:
+            Total record count.
+        """
+        return self.dataset_size
+
+    def __getitem__(self, record_key: int) -> dict[str, JaxArray]:
+        """Retrieve a deterministic record at `record_key`.
+
+        Args:
+            record_key: Integer index of the record to fetch.
+
+        Returns:
+            Dictionary with `"inputs"` and `"targets"` `JaxArray` entries.
+        """
+        ensure_eager_mode()
+        inputs: JaxArray = generate_random_tensor(
+            (self.seq_len,),
+            seed=self.seed + record_key,
+        )
+        targets: JaxArray = as_jax(jnp.asarray(record_key % 2))
+        return {"inputs": inputs, "targets": targets}
 
 
 def mock_zero_grain_loader(
-    dataset_size: int, batch_size: int, variable_seq_len: bool = False
-) -> list[dict[str, "NDArray"]]:
-    """Mock a zero-grain data ingestion pipeline.
+    dataset_size: int,
+    batch_size: int,
+    variable_seq_len: bool = False,
+    seed: int = 42,
+) -> list[dict[str, JaxArray]]:
+    """Load deterministic batches of synthetic data through `zero-grain`.
 
     Args:
-        dataset_size: The total number of items in the simulated dataset.
-        batch_size: The number of items per batch.
-        variable_seq_len: If True, simulates batches with variable sequence lengths.
+        dataset_size: Total number of items in the dataset.
+        batch_size: Number of items per batch.
+        variable_seq_len: Whether to vary sequence lengths across batches.
+        seed: Random seed for deterministic sequence length and value generation.
 
     Returns:
-        A list of batches, where each batch is a dictionary
-        containing inputs and targets.
+        List of batch dictionaries containing `"inputs"` and `"targets"` arrays.
+
+    Raises:
+        ValueError: If `batch_size` is negative.
     """
+    ensure_eager_mode()
     if batch_size < 0:
         raise ValueError("batch_size cannot be negative.")
 
-    # Edge Case: batch_size = 0
-    if batch_size == 0:
+    if batch_size == 0 or dataset_size <= 0:
         return []
 
-    batches = []
-    # Using a simple loop to mock batching since we aren't pulling the real grain dep.
-    # Edge Case: out-of-bounds indices are inherently handled by not
-    # iterating past dataset_size
-    for i in range(0, dataset_size, batch_size):
-        current_batch_size = min(batch_size, dataset_size - i)
+    source = SyntheticSequenceDataSource(
+        dataset_size=dataset_size,
+        seq_len=10,
+        seed=seed,
+    )
+    dataset = zero_grain.MapDataset.source(source)
+    total_records = len(dataset)
 
-        if variable_seq_len:
-            seq_len = np.random.randint(5, 15)
-        else:
-            seq_len = 10
-
-        batch_inputs = np.random.randn(current_batch_size, seq_len)
-        batch_targets = np.random.randint(0, 2, size=(current_batch_size,))
-
+    batches: list[dict[str, JaxArray]] = []
+    for batch_idx, start_idx in enumerate(range(0, total_records, batch_size)):
+        current_batch_size = min(batch_size, total_records - start_idx)
+        seq_len = 5 + ((seed + batch_idx * 3) % 10) if variable_seq_len else 10
+        batch_inputs: JaxArray = generate_random_tensor(
+            (current_batch_size, seq_len),
+            seed=seed + batch_idx,
+        )
+        target_vals = [
+            int(scalar_float(source[idx]["targets"]))
+            for idx in range(start_idx, start_idx + current_batch_size)
+        ]
+        batch_targets: JaxArray = as_jax(jnp.asarray(target_vals))
         batches.append({"inputs": batch_inputs, "targets": batch_targets})
 
     return batches

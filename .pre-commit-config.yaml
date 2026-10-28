@@ -3,37 +3,71 @@ repos:
     hooks:
       - id: ruff-format
         name: Ruff Format
-        entry: ruff format .
+        entry: ruff format --check .
         language: system
         types: [python]
         pass_filenames: false
 
       - id: ruff-check
-        name: Ruff Check (Fix & Enforce 100% Doc/Types via pyproject.toml)
-        entry: ruff check --fix .
+        name: Ruff Linter
+        entry: ruff check .
         language: system
         types: [python]
         pass_filenames: false
 
-      - id: mypy-strict
-        name: Mypy Strict Type Checking
-        entry: mypy .
+      - id: lint-typing
+        name: AST Typing & Reflection Linter
+        entry: python3 scripts/lint_typing.py
         language: system
         types: [python]
         pass_filenames: false
 
-      - id: pytest-coverage
-        name: Run Pytest 100% Coverage Enforced
-        entry: pytest --cov=. --cov-report=term-missing --cov-fail-under=100
+      - id: check-docs
+        name: AST 100% Docstring Coverage
+        entry: python3 scripts/check_docs.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: check-deps
+        name: Dependency Isolation Check
+        entry: python3 scripts/check_deps.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: check-compliance
+        name: Semantic Compliance Check
+        entry: python3 scripts/check_compliance.py
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: mypy
+        name: Mypy Type Checker
+        entry: mypy --strict src/zero_zoo scripts tests
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: interrogate
+        name: Interrogate Docstring Coverage
+        entry: interrogate -vv -f 100 -M -i src/zero_zoo scripts tests
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pytest
+        name: Pytest with 100% Line & Branch Coverage
+        entry: pytest --cov=src/zero_zoo --cov=scripts --cov=tests --cov-branch --cov-report=term-missing --cov-fail-under=100
         language: system
         types: [python]
         pass_filenames: false
 
       - id: update-badges
-        name: Update Coverage Shields
+        name: Update README Badges
         entry: python3 scripts/update_badges.py
         language: system
-        types: [python]
         pass_filenames: false
 
       - id: build

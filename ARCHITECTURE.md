@@ -108,9 +108,9 @@ graph TD
     ZF --> ZJ
     ZP --> COMP
     ZK --> COMP
-    ZT --> COMP
+    ZT --> ZK
     ZM --> COMP
-    ZPX --> COMP
+    ZPX --> ZJ
     
     COMP --> NUMPY
     COMP --> JAX_B

@@ -6,52 +6,125 @@ build-backend = "hatchling.build"
 name = "zero-zoo"
 version = "0.1.0"
 description = "Standardized Model Zoo for cross-framework equivalence."
+readme = "README.md"
 authors = [{ name = "Samuel Marks" }]
+license = { text = "Apache-2.0 OR MIT" }
 requires-python = ">=3.9"
-dynamic = ["dependencies"]
+dynamic = ["dependencies", "optional-dependencies"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/zero_zoo"]
+
 [tool.hatch.metadata.hooks.requirements_txt]
 files = ["requirements.txt"]
 
-[project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "playwright", "tox", "tox-uv", "mypy"]
-
-# Zero Zoo Specific Frameworks
-jax = ["zero-jax @ git+https://github.com/SamuelMarks/zero-jax.git@master", "ml-switcheroo-compiler[jax]"]
-flax = ["zero-flax @ git+https://github.com/SamuelMarks/zero-flax.git@master", "ml-switcheroo-compiler[jax]"] # Flax uses JAX backend
-keras = ["zero-keras @ git+https://github.com/SamuelMarks/zero-keras.git@master", "ml-switcheroo-compiler[keras]"]
-pytorch = ["zero-pytorch @ git+https://github.com/SamuelMarks/zero-pytorch.git@master", "ml-switcheroo-compiler[torch]"]
-mlx = ["zero-mlx @ git+https://github.com/SamuelMarks/zero-mlx.git@master", "ml-switcheroo-compiler[mlx]"]
-tensorflow = ["zero-tensorflow @ git+https://github.com/SamuelMarks/zero-tensorflow.git@master", "ml-switcheroo-compiler[tensorflow]"]
-
-# General Switcheroo Backend support
-numpy = ["ml-switcheroo-compiler[numpy]"]
-cupy = ["ml-switcheroo-compiler[cupy]"]
+[tool.hatch.metadata.hooks.requirements_txt.optional-dependencies]
+test = ["requirements-test.txt"]
+jax = ["requirements-jax.txt"]
+flax = ["requirements-flax.txt"]
+keras = ["requirements-keras.txt"]
+pytorch = ["requirements-pytorch.txt"]
+mlx = ["requirements-mlx.txt"]
+tensorflow = ["requirements-tensorflow.txt"]
+numpy = ["requirements-numpy.txt"]
+cupy = ["requirements-cupy.txt"]
 
 [tool.ruff]
 line-length = 88
-target-version = 'py39'
+target-version = "py39"
 
 [tool.ruff.lint]
-select = ['E', 'W', 'F', 'I', 'D', 'UP', 'ANN']
+select = ["E", "W", "F", "I", "D", "UP", "ANN", "B", "SIM"]
+ignore = ["D203", "D213"]
 
 [tool.ruff.lint.pydocstyle]
-convention = 'google'
+convention = "google"
+
+[tool.interrogate]
+ignore-init-method = false
+ignore-init-module = false
+ignore-magic = false
+ignore-semiprivate = false
+ignore-private = false
+ignore-property-decorators = false
+ignore-module = false
+ignore-nested-functions = false
+ignore-nested-classes = false
+fail-under = 100
+exclude = ["setup.py", "docs", "build", ".venv", ".tox"]
+verbose = 2
+
+[tool.coverage.run]
+branch = true
+source = ["src/zero_zoo", "scripts", "tests"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+exclude_lines = [
+    "if __name__ == .__main__.:",
+    '\\.\\.\\.',
+]
 
 [tool.pytest.ini_options]
-addopts = '--cov=src --cov=tests --cov-report=term-missing --cov-fail-under=100'
-testpaths = ['tests']
+pythonpath = ["src", "."]
+addopts = "--cov=src/zero_zoo --cov=scripts --cov=tests --cov-branch --cov-report=term-missing --cov-fail-under=100"
+testpaths = ["tests"]
 markers = [
-    "torch: PyTorch tests",
-    "tf: TensorFlow tests",
-    "jax: JAX tests",
-    "mlx: MLX tests",
-    "pax: Pax tests",
+    "torch: PyTorch dialect tests",
+    "tf: TensorFlow / Keras dialect tests",
+    "jax: JAX / Flax dialect tests",
+    "mlx: MLX dialect tests",
+    "pax: Pax / Praxis dialect tests",
 ]
 
 [tool.mypy]
+python_version = "3.10"
 strict = true
+disallow_any_explicit = true
+disallow_any_generics = true
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+mypy_path = [
+    "src",
+    "../ml-switcheroo-ir/src",
+    "../ml-switcheroo-compiler/src",
+    "../ml-ecosystem-snapshots/src",
+    "../cdd-python/src",
+    "../zero-jax/src",
+    "../zero-flax/src",
+    "../zero-pytorch/src",
+    "../zero-keras/src",
+    "../zero-tensorflow/src",
+    "../zero-mlx/src",
+    "../zero-pax/src",
+    "../zero-grain/src",
+    "../zero-optax/src",
+    "../zero-orbax/src",
+    "../zero-chex/src",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "cdd.*",
+    "ml_switcheroo_ir.*",
+    "ml_switcheroo_compiler.*",
+    "ml_ecosystem_snapshots.*",
+    "zero_jax.*",
+    "zero_flax.*",
+    "zero_torch.*",
+    "zero_keras.*",
+    "zero_tensorflow.*",
+    "zero_mlx.*",
+    "zero_pax.*",
+    "zero_grain.*",
+    "zero_optax.*",
+    "zero_orbax.*",
+    "zero_chex.*",
+]
+follow_imports = "silent"
 ignore_missing_imports = true

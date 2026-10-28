@@ -1,9 +1,6 @@
-"""Tests for Gemma."""
+"""Tests for Gemma 4 architectures and weight serialization."""
 
-from typing import TYPE_CHECKING, TypeVar
-
-if TYPE_CHECKING:
-    pass
+from __future__ import annotations
 
 from zero_zoo.gemma import (
     get_gemma4_native,
@@ -13,11 +10,9 @@ from zero_zoo.gemma import (
     t_gemma4_inference,
 )
 
-T = TypeVar("T")
-
 
 def test_gemma() -> None:
-    """Test Gemma functions."""
+    """Test Gemma 4 models, checkpoint loading, inference, and edge cases."""
     assert get_gemma4_native()
     assert get_gemma4_zero()
     assert load_gemma4_weights()

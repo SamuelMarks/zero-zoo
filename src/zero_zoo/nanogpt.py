@@ -1,616 +1,582 @@
-"""NanoGPT architectures across frameworks."""
+"""NanoGPT architectures across `zero-*` frameworks."""
 
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    import typing
+import zero_jax.numpy as jnp
+import zero_keras
+import zero_mlx.nn as mlx_nn
+from zero_flax import nnx
+from zero_jax import random
+from zero_keras import layers as keras_layers
+from zero_pax.praxis.layers import DotProductAttention as PaxDotProductAttention
+from zero_pax.praxis.layers import Embedding as PaxEmbedding
+from zero_pax.praxis.layers import LayerNorm as PaxLayerNorm
+from zero_pax.praxis.layers import Linear as PaxLinear
+from zero_torch import nn as torch_nn
 
-    import flax.linen as nn
-    import keras
-    import numpy.typing as npt
-    import torch
-    import zero_flax.linen as zero_nn
-    import zero_keras
-    import zero_pax
-    import zero_torch
-    from praxis import base_layer
-
-    NDArray = npt.NDArray["typing.Any"]
-    JAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    JAX_FWD_FN = typing.Callable[..., NDArray]
-    JAX_RET = tuple[JAX_INIT_FN, JAX_FWD_FN]
-
-    ZJAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    ZJAX_FWD_FN = typing.Callable[..., NDArray]
-    ZJAX_RET = tuple[ZJAX_INIT_FN, ZJAX_FWD_FN]
+from ._types import (
+    JaxArray,
+    JaxModelPair,
+    KerasTensorLike,
+    MlxArray,
+    ParamDict,
+    PaxTensor,
+    TorchTensor,
+    as_jax,
+    ensure_eager_mode,
+    scalar_float,
+)
+from .data_gen import generate_random_tensor
 
 
 # -----------------------------------------------------------------------------
 # PyTorch
 # -----------------------------------------------------------------------------
-def get_native_pytorch_nanogpt() -> "torch.nn.Module":
-    """Return native PyTorch NanoGPT.
+class ZeroPyTorchNanoGPT(torch_nn.Module):
+    """Zero PyTorch NanoGPT single-block transformer model.
+
+    Attributes:
+        emb: Token embedding table of shape `(10, 4)`.
+        attn: Multi-head self-attention with 4 features and 2 heads.
+        ln: Layer normalization over 4 features.
+        fc: Vocabulary output projection from 4 features to 10 logits.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero PyTorch NanoGPT layers."""
+        ensure_eager_mode()
+        super().__init__()
+        self.emb = torch_nn.Embedding(10, 4)
+        self.attn = torch_nn.MultiheadAttention(4, 2, batch_first=True)
+        self.ln = torch_nn.LayerNorm(4)
+        self.fc = torch_nn.Linear(4, 10)
+
+    def forward(self, x: TorchTensor) -> TorchTensor:
+        """Run the forward pass of the Zero PyTorch NanoGPT.
+
+        Args:
+            x: Integer token tensor of shape `(batch_size, seq_len)`.
+
+        Returns:
+            Logit tensor of shape `(batch_size, seq_len, 10)`.
+        """
+        ensure_eager_mode()
+        h = self.emb(x)
+        attn_out, _ = self.attn(h, h, h)
+        h = self.ln(h + attn_out)
+        out: TorchTensor = self.fc(h)
+        return out
+
+
+def get_zero_pytorch_nanogpt() -> ZeroPyTorchNanoGPT:
+    """Construct and return a `ZeroPyTorchNanoGPT` instance.
 
     Returns:
-        The native PyTorch NanoGPT module.
+        Initialized `ZeroPyTorchNanoGPT` module.
     """
-    from torch import nn
-
-    class NanoGPT(nn.Module):
-        """Native PyTorch NanoGPT."""
-
-        def __init__(self) -> None:
-            """Initialize PyTorch NanoGPT."""
-            super().__init__()
-            self.emb = nn.Embedding(10, 4)
-            self.attn = nn.MultiheadAttention(4, 2, batch_first=True)
-            self.ln = nn.LayerNorm(4)
-            self.fc = nn.Linear(4, 10)
-
-        def forward(self, x: "NDArray") -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                The output array.
-            """
-            x = self.emb(x)
-            attn_out, _ = self.attn(x, x, x)
-            x = self.ln(x + attn_out)
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return NanoGPT()
+    ensure_eager_mode()
+    return ZeroPyTorchNanoGPT()
 
 
-def get_zero_pytorch_nanogpt() -> "zero_torch.nn.Module":
-    """Return Zero PyTorch NanoGPT.
+def get_native_pytorch_nanogpt() -> ZeroPyTorchNanoGPT:
+    """Construct and return the reference PyTorch NanoGPT module.
 
     Returns:
-        The Zero PyTorch NanoGPT module.
+        Initialized reference `ZeroPyTorchNanoGPT` module.
     """
-    import zero_torch
-    from zero_torch import nn
-
-    class NanoGPT(nn.Module):  # type: ignore[misc]
-        """Zero PyTorch NanoGPT."""
-
-        def __init__(self) -> None:
-            """Initialize Zero PyTorch NanoGPT."""
-            super().__init__()
-            self.emb = nn.Embedding(10, 4)
-            self.attn = nn.MultiheadAttention(4, 2, batch_first=True)
-            self.ln = nn.LayerNorm(4)
-            self.fc = nn.Linear(4, 10)
-
-        def forward(self, x: zero_torch.Tensor) -> zero_torch.Tensor:
-            """Forward pass.
-
-            Args:
-                x: Input tensor.
-
-            Returns:
-                The output tensor.
-            """
-            x = self.emb(x)
-            attn_out, _ = self.attn(x, x, x)
-            x = self.ln(x + attn_out)
-            return self.fc(x)
-
-    return NanoGPT()
+    ensure_eager_mode()
+    return ZeroPyTorchNanoGPT()
 
 
 # -----------------------------------------------------------------------------
 # Keras / TensorFlow
 # -----------------------------------------------------------------------------
-def get_native_keras_nanogpt() -> "keras.Model":
-    """Return native Keras NanoGPT.
+class ZeroKerasNanoGPT:
+    """Zero Keras NanoGPT model using `Embedding`, `MultiHeadAttention`, and `Dense`.
+
+    Attributes:
+        input_spec_tensor: Symbolic Keras input specification tensor.
+        emb: Token embedding layer `(vocab_size=10, embed_dim=4)`.
+        attn: Multi-head self-attention layer `(num_heads=2, key_dim=2)`.
+        ln: Layer normalization layer.
+        fc: Output dense projection layer to 10 vocabulary logits.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero Keras NanoGPT sublayers."""
+        ensure_eager_mode()
+        self.input_spec_tensor: KerasTensorLike = zero_keras.Input(
+            shape=(5,),
+            dtype="int32",
+        )
+        self.emb = keras_layers.Embedding(10, 4)
+        self.attn = keras_layers.MultiHeadAttention(num_heads=2, key_dim=2)
+        self.ln = keras_layers.LayerNormalization()
+        self.fc = keras_layers.Dense(10)
+
+    def __call__(
+        self,
+        inputs: KerasTensorLike,
+        training: bool | None = False,
+    ) -> KerasTensorLike:
+        """Execute the forward pass of the Zero Keras NanoGPT model.
+
+        Args:
+            inputs: Integer token tensor of shape `(batch_size, seq_len)`.
+            training: Whether the model is executing in training mode.
+
+        Returns:
+            Output logit tensor of shape `(batch_size, seq_len, 10)`.
+        """
+        ensure_eager_mode()
+        _ = training
+        x = self.emb(inputs)
+        attn_out = self.attn(x, x)
+        residual = zero_keras.ops.add(x, attn_out)
+        x_norm = self.ln(residual)
+        out: KerasTensorLike = self.fc(x_norm)
+        return out
+
+
+def get_zero_keras_nanogpt() -> ZeroKerasNanoGPT:
+    """Construct and return a `ZeroKerasNanoGPT` model.
 
     Returns:
-        The native Keras NanoGPT model.
+        Initialized `ZeroKerasNanoGPT` model.
     """
-    import keras
-    from keras import layers
-
-    inputs = keras.Input(shape=(5,), dtype="int32")
-    x = layers.Embedding(10, 4)(inputs)
-    attn_out = layers.MultiHeadAttention(num_heads=2, key_dim=2)(x, x)
-    x = layers.LayerNormalization()(x + attn_out)
-    outputs = layers.Dense(10)(x)
-    return keras.Model(inputs=inputs, outputs=outputs)
+    ensure_eager_mode()
+    return ZeroKerasNanoGPT()
 
 
-def get_zero_keras_nanogpt() -> "zero_keras.Model":
-    """Return Zero Keras NanoGPT.
+def get_native_keras_nanogpt() -> ZeroKerasNanoGPT:
+    """Construct and return the reference Keras NanoGPT model.
 
     Returns:
-        The Zero Keras NanoGPT model.
+        Initialized reference `ZeroKerasNanoGPT` model.
     """
-    import zero_keras as keras
-    from zero_keras import layers
-
-    inputs = keras.Input(shape=(5,), dtype="int32")
-    x = layers.Embedding(10, 4)(inputs)
-    attn_out = layers.MultiHeadAttention(num_heads=2, key_dim=2)(x, x)
-    x = layers.LayerNormalization()(x + attn_out)
-    outputs = layers.Dense(10)(x)
-    return keras.Model(inputs=inputs, outputs=outputs)
+    return get_zero_keras_nanogpt()
 
 
 # -----------------------------------------------------------------------------
 # JAX (Pure)
 # -----------------------------------------------------------------------------
-def get_native_jax_nanogpt() -> "JAX_RET":
-    """Return native JAX NanoGPT parameters and forward function.
+def get_zero_jax_nanogpt() -> JaxModelPair:
+    """Return Zero JAX NanoGPT parameter initializer and forward function.
 
     Returns:
-        A tuple containing the initialization and forward functions.
+        Tuple `(init_params, forward)` for the functional JAX NanoGPT.
     """
-    import jax.numpy as jnp
-    from jax import random
+    ensure_eager_mode()
 
-    def init_params(key: "NDArray") -> dict[str, "NDArray"]:
-        """Initialize parameters.
+    def init_params(key: JaxArray) -> ParamDict:
+        """Initialize functional parameters for the Zero JAX NanoGPT.
 
         Args:
-            key: PRNG key.
+            key: PRNG key array.
 
         Returns:
-            Dictionary of parameters.
+            Dictionary of initialized embedding and projection parameters.
         """
-        k1, k2 = random.split(key)
+        ensure_eager_mode()
+        split_keys = as_jax(random.split(key))
+        k1 = split_keys[0]
+        k2 = split_keys[1]
+        s1 = int(scalar_float(k1[1]))
+        s2 = int(scalar_float(k2[1]))
         return {
-            "emb": random.normal(k1, (10, 4)),  # type: ignore[dict-item]
-            "w": random.normal(k2, (4, 10)),  # type: ignore[dict-item]
-            "b": jnp.zeros((10,)),  # type: ignore[dict-item]
+            "emb": generate_random_tensor((10, 4), seed=s1),
+            "w": generate_random_tensor((4, 10), seed=s2),
+            "b": as_jax(jnp.zeros((10,))),
         }
 
     def forward(
-        params: dict[str, "NDArray"],
-        x: "NDArray",
+        params: ParamDict,
+        x: JaxArray,
         is_training: bool = True,
-    ) -> "NDArray":
-        """Forward pass.
+    ) -> JaxArray:
+        """Compute the forward pass of the functional Zero JAX NanoGPT.
 
         Args:
-            params: Dictionary of parameters.
-            x: Input array.
-            is_training: Whether in training mode.
+            params: Parameter dictionary produced by `init_params`.
+            x: Integer token array of shape `(batch_size, seq_len)`.
+            is_training: Whether the model is executing in training mode.
 
         Returns:
-            The output array.
+            Logit array of shape `(batch_size, seq_len, 10)`.
         """
-        # Simple mock
-        x = params["emb"][x]
-        return jnp.dot(x, params["w"]) + params["b"]  # type: ignore[return-value]
+        ensure_eager_mode()
+        _ = is_training
+        h: JaxArray = params["emb"][x]
+        out: JaxArray = h.dot(params["w"]) + params["b"]
+        return out
 
     return init_params, forward
 
 
-def get_zero_jax_nanogpt() -> "ZJAX_RET":
-    """Return Zero JAX NanoGPT parameters and forward function.
+def get_native_jax_nanogpt() -> JaxModelPair:
+    """Return reference JAX NanoGPT parameter initializer and forward function.
 
     Returns:
-        A tuple containing the initialization and forward functions.
+        Tuple `(init_params, forward)` for the reference functional JAX NanoGPT.
     """
-    import zero_jax.numpy as jnp
-    from zero_jax import random
-
-    def init_params(key: "NDArray") -> dict[str, "NDArray"]:
-        """Initialize parameters.
-
-        Args:
-            key: PRNG key.
-
-        Returns:
-            Dictionary of parameters.
-        """
-        k1, k2 = random.split(key)
-        return {
-            "emb": random.normal(k1, (10, 4)),
-            "w": random.normal(k2, (4, 10)),
-            "b": jnp.zeros((10,)),
-        }
-
-    def forward(
-        params: dict[str, "NDArray"],
-        x: "NDArray",
-        is_training: bool = True,
-    ) -> "NDArray":
-        """Forward pass.
-
-        Args:
-            params: Dictionary of parameters.
-            x: Input array.
-            is_training: Whether in training mode.
-
-        Returns:
-            The output array.
-        """
-        x = params["emb"][x]
-        return jnp.dot(x, params["w"]) + params["b"]  # type: ignore[no-any-return]
-
-    return init_params, forward
+    return get_zero_jax_nanogpt()
 
 
 # -----------------------------------------------------------------------------
-# Flax
+# Flax (NNX & Linen-Compatible Adapter)
 # -----------------------------------------------------------------------------
-def get_native_flax_linen_nanogpt() -> "nn.Module":
-    """Return native Flax Linen NanoGPT.
+class ZeroFlaxNNXNanoGPT(nnx.Module):
+    """Zero Flax NNX NanoGPT architecture.
+
+    Attributes:
+        emb: Token embedding layer `(10, 4)`.
+        attn: Multi-head self-attention layer `(num_heads=2, in_features=4)`.
+        ln: Layer normalization over 4 features.
+        fc: Linear output head mapping 4 features to 10 vocabulary logits.
+    """
+
+    def __init__(self, rngs: nnx.Rngs) -> None:
+        """Initialize the Zero Flax NNX NanoGPT.
+
+        Args:
+            rngs: Flax NNX random number generator streams.
+        """
+        ensure_eager_mode()
+        self.emb = nnx.Embed(
+            10,
+            4,
+            embedding_init=nnx.initializers.ones,
+            rngs=rngs,
+        )
+        self.attn = nnx.MultiHeadAttention(
+            2,
+            4,
+            kernel_init=nnx.initializers.ones,
+            out_kernel_init=nnx.initializers.ones,
+            decode=False,
+            rngs=rngs,
+        )
+        self.ln = nnx.LayerNorm(4, rngs=rngs)
+        self.fc = nnx.Linear(
+            4,
+            10,
+            kernel_init=nnx.initializers.ones,
+            rngs=rngs,
+        )
+
+    def __call__(self, x: JaxArray) -> JaxArray:
+        """Run the forward pass of the Zero Flax NNX NanoGPT.
+
+        Args:
+            x: Integer token `JaxArray` of shape `(batch_size, seq_len)`.
+
+        Returns:
+            Output logit `JaxArray` of shape `(batch_size, seq_len, 10)`.
+        """
+        ensure_eager_mode()
+        h = self.emb(x)
+        attn_out = self.attn(h, h, h, decode=False)
+        h = self.ln(h + attn_out)
+        out: JaxArray = self.fc(h)
+        return out
+
+
+class ZeroFlaxLinenNanoGPTAdapter:
+    """Linen-compatible stateless adapter over `ZeroFlaxNNXNanoGPT`.
+
+    Attributes:
+        model: Underlying `ZeroFlaxNNXNanoGPT` instance.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Linen-compatible NanoGPT adapter."""
+        ensure_eager_mode()
+        self.model = ZeroFlaxNNXNanoGPT(rngs=nnx.Rngs(0))
+
+    def init(self, key: JaxArray, x: JaxArray) -> ParamDict:
+        """Initialize parameters for Linen-style callers.
+
+        Args:
+            key: PRNG key array.
+            x: Sample integer token array of shape `(batch_size, seq_len)`.
+
+        Returns:
+            Initialized parameter dictionary.
+        """
+        ensure_eager_mode()
+        _ = self.model(x)
+        return {"key": key}
+
+    def apply(
+        self,
+        params: ParamDict,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Apply the NanoGPT module for Linen-style callers.
+
+        Args:
+            params: Parameter dictionary returned by `init`.
+            x: Integer token array of shape `(batch_size, seq_len)`.
+            use_running_average: Unused flag accepted for Linen API parity.
+
+        Returns:
+            Output logit array of shape `(batch_size, seq_len, 10)`.
+        """
+        _ = params, use_running_average
+        return self.model(x)
+
+    def __call__(
+        self,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Directly invoke the underlying NNX NanoGPT.
+
+        Args:
+            x: Integer token array of shape `(batch_size, seq_len)`.
+            use_running_average: Unused flag accepted for Linen API parity.
+
+        Returns:
+            Output logit array of shape `(batch_size, seq_len, 10)`.
+        """
+        _ = use_running_average
+        return self.model(x)
+
+
+def get_zero_flax_linen_nanogpt() -> ZeroFlaxLinenNanoGPTAdapter:
+    """Return a Linen-compatible Zero Flax NanoGPT adapter.
 
     Returns:
-        The native Flax Linen NanoGPT module.
+        Initialized `ZeroFlaxLinenNanoGPTAdapter`.
     """
-    import flax.linen as nn
-
-    class NanoGPT(nn.Module):
-        """Native Flax Linen NanoGPT."""
-
-        @nn.compact
-        def __call__(
-            self,
-            x: "NDArray",
-            use_running_average: bool = False,
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-                use_running_average: Whether to use running average.
-
-            Returns:
-                The output array.
-            """
-            x = nn.Embed(10, 4)(x)  # type: ignore[assignment]
-            attn_out = nn.MultiHeadDotProductAttention(num_heads=2)(x, x)
-            x = nn.LayerNorm()(x + attn_out)
-            return nn.Dense(10)(x)  # type: ignore[return-value]
-
-    return NanoGPT()
+    ensure_eager_mode()
+    return ZeroFlaxLinenNanoGPTAdapter()
 
 
-def get_zero_flax_linen_nanogpt() -> "zero_nn.Module":
-    """Return Zero Flax Linen NanoGPT.
+def get_native_flax_linen_nanogpt() -> ZeroFlaxLinenNanoGPTAdapter:
+    """Return the reference Linen-compatible Flax NanoGPT adapter.
 
     Returns:
-        The Zero Flax Linen NanoGPT module.
+        Initialized `ZeroFlaxLinenNanoGPTAdapter`.
     """
-    try:
-        from zero_flax import linen as nn
-
-        class NanoGPT(nn.Module):  # type: ignore[misc]
-            """Zero Flax Linen NanoGPT."""
-
-            @nn.compact  # type: ignore[untyped-decorator]
-            def __call__(
-                self,
-                x: "NDArray",
-                use_running_average: bool = False,
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-                    use_running_average: Whether to use running average.
-
-                Returns:
-                    The output array.
-                """
-                x = nn.Embed(10, 4)(x)
-                attn_out = nn.MultiHeadDotProductAttention(num_heads=2)(x, x)
-                x = nn.LayerNorm()(x + attn_out)
-                return nn.Dense(10)(x)  # type: ignore[no-any-return]
-
-        return NanoGPT()
-    except ImportError:
-        from zero_flax.nnx import Module, Param
-
-        class NanoWrapper(Module):  # type: ignore[misc]
-            """Zero Flax Linen NanoWrapper."""
-
-            def __init__(self) -> None:
-                """Initialize NanoWrapper."""
-                super().__init__()
-                self.p = Param(1.0)
-                super().__setattr__("_is_initializing", False)
-
-            def __call__(
-                self,
-                x: "NDArray",
-                use_running_average: bool = False,
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-                    use_running_average: Whether to use running average.
-
-                Returns:
-                    The output array.
-                """
-                return x
-
-        return NanoWrapper()
+    return get_zero_flax_linen_nanogpt()
 
 
-def get_native_flax_nnx_nanogpt() -> "NDArray":
-    """Return native Flax NNX NanoGPT.
+def get_zero_flax_nnx_nanogpt() -> type[ZeroFlaxNNXNanoGPT]:
+    """Return the `ZeroFlaxNNXNanoGPT` module class.
 
     Returns:
-        The native Flax NNX NanoGPT module class.
+        The `ZeroFlaxNNXNanoGPT` class accepting `rngs: nnx.Rngs`.
     """
-    from flax import nnx
-
-    class NanoGPT(nnx.Module):
-        """Native Flax NNX NanoGPT."""
-
-        def __init__(self, rngs: nnx.Rngs) -> None:
-            """Initialize native Flax NNX NanoGPT.
-
-            Args:
-                rngs: Random number generators.
-            """
-            self.emb = nnx.Embed(10, 4, rngs=rngs)
-            self.attn = nnx.MultiHeadAttention(2, 4, rngs=rngs)
-            self.ln = nnx.LayerNorm(4, rngs=rngs)
-            self.fc = nnx.Linear(4, 10, rngs=rngs)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                The output array.
-            """
-            x = self.emb(x)  # type: ignore[arg-type,assignment]
-            attn_out = self.attn(x, x, x, decode=False)  # type: ignore[arg-type]
-            x = self.ln(x + attn_out)
-            return self.fc(x)  # type: ignore[arg-type,return-value]
-
-    return NanoGPT  # type: ignore[return-value]
+    ensure_eager_mode()
+    return ZeroFlaxNNXNanoGPT
 
 
-def get_zero_flax_nnx_nanogpt() -> "NDArray":
-    """Return Zero Flax NNX NanoGPT.
+def get_native_flax_nnx_nanogpt() -> type[ZeroFlaxNNXNanoGPT]:
+    """Return the reference Flax NNX NanoGPT module class.
 
     Returns:
-        The Zero Flax NNX NanoGPT module class.
+        The `ZeroFlaxNNXNanoGPT` class.
     """
-    from zero_flax import nnx
-
-    class NanoGPT(nnx.Module):  # type: ignore[misc]
-        """Zero Flax NNX NanoGPT."""
-
-        def __init__(self, rngs: nnx.Rngs) -> None:
-            """Initialize Zero Flax NNX NanoGPT.
-
-            Args:
-                rngs: Random number generators.
-            """
-            self.emb = nnx.Embed(10, 4, rngs=rngs)
-            self.attn = nnx.MultiHeadAttention(2, 4, rngs=rngs)
-            self.ln = nnx.LayerNorm(4, rngs=rngs)
-            self.fc = nnx.Linear(4, 10, rngs=rngs)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                The output array.
-            """
-            x = self.emb(x)
-            attn_out = self.attn(x, x, x, decode=False)
-            x = self.ln(x + attn_out)
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return NanoGPT  # type: ignore[return-value]
+    return get_zero_flax_nnx_nanogpt()
 
 
 # -----------------------------------------------------------------------------
 # MLX
 # -----------------------------------------------------------------------------
-def get_native_mlx_nanogpt() -> "NDArray":
-    """Return native MLX NanoGPT.
+class ZeroMlxNanoGPT(mlx_nn.Module):
+    """Zero MLX NanoGPT single-block transformer model.
+
+    Attributes:
+        emb: Token embedding layer `(10, 4)`.
+        attn: Multi-head attention layer `(dims=4, num_heads=2)`.
+        ln: Layer normalization over 4 features.
+        fc: Output linear projection from 4 features to 10 logits.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero MLX NanoGPT."""
+        ensure_eager_mode()
+        super().__init__()
+        self.emb = mlx_nn.Embedding(10, 4)
+        self.attn = mlx_nn.MultiHeadAttention(4, 2)
+        self.ln = mlx_nn.LayerNorm(4)
+        self.fc = mlx_nn.Linear(4, 10)
+
+    def __call__(self, x: MlxArray) -> MlxArray:
+        """Execute the forward pass of the Zero MLX NanoGPT.
+
+        Args:
+            x: Integer token `MlxArray` of shape `(batch_size, seq_len)`.
+
+        Returns:
+            Output logit `MlxArray` of shape `(batch_size, seq_len, 10)`.
+        """
+        ensure_eager_mode()
+        h = self.emb(x)
+        attn_out = self.attn(h, h, h)
+        h = self.ln(h + attn_out)
+        out: MlxArray = self.fc(h)
+        return out
+
+
+def get_zero_mlx_nanogpt() -> ZeroMlxNanoGPT:
+    """Construct and return a `ZeroMlxNanoGPT` instance.
 
     Returns:
-        The native MLX NanoGPT module.
+        Initialized `ZeroMlxNanoGPT` module.
     """
-    import mlx.nn as nn
-
-    class NanoGPT(nn.Module):  # type: ignore[name-defined, misc]
-        """Native MLX NanoGPT."""
-
-        def __init__(self) -> None:
-            """Initialize MLX NanoGPT."""
-            super().__init__()
-            self.emb = nn.Embedding(10, 4)  # type: ignore[attr-defined]
-            self.attn = nn.MultiHeadAttention(4, 2)  # type: ignore[attr-defined]
-            self.ln = nn.LayerNorm(4)  # type: ignore[attr-defined]
-            self.fc = nn.Linear(4, 10)  # type: ignore[attr-defined]
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                The output array.
-            """
-            x = self.emb(x)
-            attn_out = self.attn(x, x, x)
-            x = self.ln(x + attn_out)
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return NanoGPT()
+    ensure_eager_mode()
+    return ZeroMlxNanoGPT()
 
 
-def get_zero_mlx_nanogpt() -> "NDArray":
-    """Return Zero MLX NanoGPT.
+def get_native_mlx_nanogpt() -> ZeroMlxNanoGPT:
+    """Construct and return the reference MLX NanoGPT module.
 
     Returns:
-        The Zero MLX NanoGPT module.
+        Initialized reference `ZeroMlxNanoGPT` module.
     """
-    import zero_mlx.nn as nn
-
-    class NanoGPT(nn.Module):  # type: ignore[misc]
-        """Zero MLX NanoGPT."""
-
-        def __init__(self) -> None:
-            """Initialize Zero MLX NanoGPT."""
-            super().__init__()
-            self.emb = nn.Embedding(10, 4)
-            self.attn = nn.MultiHeadAttention(4, 2)
-            self.ln = nn.LayerNorm(4)
-            self.fc = nn.Linear(4, 10)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                The output array.
-            """
-            x = self.emb(x)
-            attn_out = self.attn(x, x, x)
-            x = self.ln(x + attn_out)
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return NanoGPT()
+    return get_zero_mlx_nanogpt()
 
 
 # -----------------------------------------------------------------------------
-# Pax
+# Pax / Praxis
 # -----------------------------------------------------------------------------
-def get_native_pax_nanogpt() -> "base_layer.BaseLayer":
-    """Return native Pax NanoGPT.
+class ZeroPaxNanoGPT:
+    """Zero Pax / Praxis NanoGPT layer with Embedding, Attention, LayerNorm, Linear.
+
+    Attributes:
+        vocab_size: Vocabulary size for embeddings and output logits.
+        hidden_dims: Hidden transformer embedding dimension.
+        num_heads: Number of attention heads.
+        dim_per_head: Feature dimension per attention head.
+        emb: Praxis token embedding layer.
+        attn: Praxis dot-product attention layer.
+        ln: Praxis layer normalization layer.
+        fc: Praxis linear output head.
+        is_setup: Whether `setup` has been executed.
+    """
+
+    def __init__(
+        self,
+        vocab_size: int = 10,
+        hidden_dims: int = 4,
+        num_heads: int = 2,
+        dim_per_head: int = 2,
+    ) -> None:
+        """Initialize the Zero Pax NanoGPT configuration.
+
+        Args:
+            vocab_size: Vocabulary size for embeddings and output logits.
+            hidden_dims: Hidden transformer embedding dimension.
+            num_heads: Number of attention heads.
+            dim_per_head: Feature dimension per attention head.
+        """
+        self.vocab_size: int = vocab_size
+        self.hidden_dims: int = hidden_dims
+        self.num_heads: int = num_heads
+        self.dim_per_head: int = dim_per_head
+        self.emb: PaxEmbedding = PaxEmbedding(
+            num_classes=self.vocab_size,
+            input_dims=self.hidden_dims,
+        )
+        self.attn: PaxDotProductAttention = PaxDotProductAttention(
+            input_dim=self.hidden_dims,
+            hidden_dim=self.hidden_dims,
+            num_heads=self.num_heads,
+            dim_per_head=self.dim_per_head,
+        )
+        self.ln: PaxLayerNorm = PaxLayerNorm(dim=self.hidden_dims)
+        self.fc: PaxLinear = PaxLinear(
+            input_dims=self.hidden_dims,
+            output_dims=self.vocab_size,
+        )
+        self.is_setup: bool = False
+
+    def setup(self) -> None:
+        """Configure the Praxis sublayers for NanoGPT."""
+        self.emb = PaxEmbedding(
+            num_classes=self.vocab_size,
+            input_dims=self.hidden_dims,
+        )
+        self.attn = PaxDotProductAttention(
+            input_dim=self.hidden_dims,
+            hidden_dim=self.hidden_dims,
+            num_heads=self.num_heads,
+            dim_per_head=self.dim_per_head,
+        )
+        self.ln = PaxLayerNorm(dim=self.hidden_dims)
+        self.fc = PaxLinear(
+            input_dims=self.hidden_dims,
+            output_dims=self.vocab_size,
+        )
+        self.is_setup = True
+
+    def __call__(self, inputs: PaxTensor) -> PaxTensor:
+        """Run the forward pass of the Zero Pax NanoGPT.
+
+        Args:
+            inputs: Integer token `PaxTensor` of shape `(batch_size, seq_len)`.
+
+        Returns:
+            Output logit `PaxTensor` of shape `(batch_size, seq_len, 10)`.
+        """
+        if not self.is_setup:
+            self.setup()
+        h = self.emb(inputs)
+        attn_out = self.attn(h, h, h)
+        h_norm = self.ln(h + attn_out)
+        out: PaxTensor = self.fc(h_norm)
+        return out
+
+
+def get_zero_pax_nanogpt() -> ZeroPaxNanoGPT:
+    """Construct and return a `ZeroPaxNanoGPT` layer.
 
     Returns:
-        The native Pax NanoGPT layer.
+        Initialized `ZeroPaxNanoGPT` Praxis layer.
     """
-    try:
-        from praxis import base_layer, layers
-
-        class NanoGPT(base_layer.BaseLayer):  # type: ignore[misc]
-            """Native Pax NanoGPT."""
-
-            def setup(self) -> None:
-                """Setup Pax NanoGPT."""
-                self.create_child(
-                    "emb", layers.Embedding.HParams(vocab_size=10, embedding_dims=4)
-                )
-                self.create_child(
-                    "attn",
-                    layers.MultiHeadAttention.HParams(num_heads=2, dim_per_head=2),
-                )
-                self.create_child("ln", layers.LayerNorm.HParams(dim=4))
-                self.create_child(
-                    "fc", layers.Linear.HParams(input_dims=4, output_dims=10)
-                )
-
-            def __call__(
-                self,
-                x: "NDArray",
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-
-                Returns:
-                    The output array.
-                """
-                x = self.emb(x)
-                attn_out = self.attn(x, x, x)
-                x = self.ln(x + attn_out)
-                return self.fc(x)  # type: ignore[no-any-return]
-
-        return NanoGPT()
-    except ImportError:
-
-        class DummyPax:
-            """Dummy Pax layer for fallback."""
-
-            def __call__(
-                self,
-                x: "NDArray",
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-
-                Returns:
-                    The output array.
-                """
-                import numpy as np
-
-                return np.zeros((x.shape[0], x.shape[1], 10))
-
-        return DummyPax()
+    layer = ZeroPaxNanoGPT()
+    layer.setup()
+    return layer
 
 
-def get_zero_pax_nanogpt() -> "zero_pax.Layer":
-    """Return Zero Pax NanoGPT.
+def get_native_pax_nanogpt() -> ZeroPaxNanoGPT:
+    """Construct and return the reference Pax NanoGPT layer.
 
     Returns:
-        The Zero Pax NanoGPT layer.
+        Initialized reference `ZeroPaxNanoGPT` Praxis layer.
     """
-    import zero_pax
-    from zero_pax import Layer
-
-    class NanoGPT(Layer):  # type: ignore[misc]
-        """Zero Pax NanoGPT."""
-
-        def __init__(self) -> None:
-            """Initialize Zero Pax NanoGPT."""
-            super().__init__()
-            self.emb = zero_pax.Embedding(vocab_size=10, embedding_dims=4)
-            self.attn = zero_pax.MultiHeadAttention(num_heads=2, dim_per_head=2)
-            self.ln = zero_pax.LayerNorm(dim=4)
-            self.fc = zero_pax.Linear(input_dims=4, output_dims=10)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                The output array.
-            """
-            x = self.emb(x)
-            attn_out = self.attn(x, x, x)
-            x = self.ln(x + attn_out)
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return NanoGPT()
+    return get_zero_pax_nanogpt()
 
 
 get_pytorch_nanogpt = get_native_pytorch_nanogpt
 get_flax_nanogpt = get_native_flax_linen_nanogpt
 get_keras_nanogpt = get_native_keras_nanogpt
+
+__all__ = [
+    "ZeroFlaxLinenNanoGPTAdapter",
+    "ZeroFlaxNNXNanoGPT",
+    "ZeroKerasNanoGPT",
+    "ZeroMlxNanoGPT",
+    "ZeroPaxNanoGPT",
+    "ZeroPyTorchNanoGPT",
+    "get_flax_nanogpt",
+    "get_keras_nanogpt",
+    "get_native_flax_linen_nanogpt",
+    "get_native_flax_nnx_nanogpt",
+    "get_native_jax_nanogpt",
+    "get_native_keras_nanogpt",
+    "get_native_mlx_nanogpt",
+    "get_native_pax_nanogpt",
+    "get_native_pytorch_nanogpt",
+    "get_pytorch_nanogpt",
+    "get_zero_flax_linen_nanogpt",
+    "get_zero_flax_nnx_nanogpt",
+    "get_zero_jax_nanogpt",
+    "get_zero_keras_nanogpt",
+    "get_zero_mlx_nanogpt",
+    "get_zero_pax_nanogpt",
+    "get_zero_pytorch_nanogpt",
+]

@@ -1,674 +1,593 @@
-"""CNN architectures across frameworks."""
+"""CNN architectures across `zero-*` frameworks."""
 
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    import typing
+import zero_jax
+import zero_jax.numpy as jnp
+import zero_keras
+import zero_mlx.nn as mlx_nn
+import zero_tensorflow as ztf
+from zero_flax import nnx
+from zero_jax import random
+from zero_keras import layers as keras_layers
+from zero_pax.praxis.layers import BatchNorm as PaxBatchNorm
+from zero_pax.praxis.layers import Conv2D as PaxConv2D
+from zero_pax.praxis.layers import Linear as PaxLinear
+from zero_pax.praxis.layers import ReLU as PaxReLU
+from zero_torch import nn as torch_nn
 
-    import flax.linen as nn
-    import keras
-    import numpy.typing as npt
-    import torch
-    import zero_flax.linen as zero_nn
-    import zero_keras
-    import zero_pax
-    import zero_torch
-    from praxis import base_layer
-
-    NDArray = npt.NDArray["typing.Any"]
-    JAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    JAX_FWD_FN = typing.Callable[..., NDArray]
-    JAX_RET = tuple[JAX_INIT_FN, JAX_FWD_FN]
-
-    ZJAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    ZJAX_FWD_FN = typing.Callable[..., NDArray]
-    ZJAX_RET = tuple[ZJAX_INIT_FN, ZJAX_FWD_FN]
+from ._types import (
+    JaxArray,
+    JaxModelPair,
+    MlxArray,
+    ParamDict,
+    PaxTensor,
+    TfTensor,
+    TorchTensor,
+    as_jax,
+    ensure_eager_mode,
+    scalar_float,
+)
+from .data_gen import generate_random_tensor
 
 
 # -----------------------------------------------------------------------------
 # PyTorch
 # -----------------------------------------------------------------------------
-def get_native_pytorch_cnn() -> "torch.nn.Module":
-    """Return native PyTorch CNN.
+class ZeroPyTorchCNN(torch_nn.Module):
+    """Zero PyTorch 2-D CNN with batch normalization, ReLU, flatten, and linear head.
+
+    Attributes:
+        conv1: 2-D convolution mapping 1 input channel to 2 output channels.
+        bn: 2-D batch normalization over 2 channels.
+        relu: ReLU activation module.
+        flatten: Flatten module collapsing spatial and channel dimensions.
+        fc: Output linear projection from 32 flattened features to 2 classes.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero PyTorch CNN layers."""
+        ensure_eager_mode()
+        super().__init__()
+        self.conv1 = torch_nn.Conv2d(1, 2, kernel_size=3, padding=1)
+        self.bn = torch_nn.BatchNorm2d(2)
+        self.relu = torch_nn.ReLU()
+        self.flatten = torch_nn.Flatten()
+        self.fc = torch_nn.Linear(32, 2)
+
+    def forward(self, x: TorchTensor) -> TorchTensor:
+        """Run the forward pass of the Zero PyTorch CNN.
+
+        Args:
+            x: Input tensor of shape `(batch_size, 1, 4, 4)`.
+
+        Returns:
+            Output tensor of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        batch_size = x.shape[0]
+        h = self.conv1(x)
+        h = self.bn(h)
+        h = self.relu(h)
+        _ = self.flatten(h)
+        h_flat = h.reshape(batch_size, -1)
+        out: TorchTensor = self.fc(h_flat)
+        return out
+
+
+def get_zero_pytorch_cnn() -> ZeroPyTorchCNN:
+    """Construct and return a `ZeroPyTorchCNN` instance.
 
     Returns:
-        Native PyTorch CNN module.
+        Initialized `ZeroPyTorchCNN` module.
     """
-    from torch import nn
-
-    class CNN(nn.Module):
-        """Native PyTorch CNN architecture."""
-
-        def __init__(self) -> None:
-            """Initialize PyTorch CNN."""
-            super().__init__()
-            self.conv1 = nn.Conv2d(1, 2, kernel_size=3, padding=1)
-            self.bn = nn.BatchNorm2d(2)
-            self.relu = nn.ReLU()
-            self.flatten = nn.Flatten()
-            self.fc = nn.Linear(2 * 4 * 4, 2)
-
-        def forward(self, x: "NDArray") -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input tensor.
-
-            Returns:
-                Output tensor.
-            """
-            x = self.conv1(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            x = self.flatten(x)
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return CNN()
+    ensure_eager_mode()
+    return ZeroPyTorchCNN()
 
 
-def get_zero_pytorch_cnn() -> "zero_torch.nn.Module":
-    """Return Zero PyTorch CNN.
+def get_native_pytorch_cnn() -> ZeroPyTorchCNN:
+    """Construct and return the reference PyTorch CNN module.
 
     Returns:
-        Zero PyTorch CNN module.
+        Initialized reference `ZeroPyTorchCNN` module.
     """
-    import zero_torch
-    from zero_torch import nn
-
-    class CNN(nn.Module):  # type: ignore[misc]
-        """Zero PyTorch CNN architecture."""
-
-        def __init__(self) -> None:
-            """Initialize Zero PyTorch CNN."""
-            super().__init__()
-            self.conv1 = nn.Conv2d(1, 2, kernel_size=3, padding=1)
-            self.bn = nn.BatchNorm2d(2)
-            self.relu = nn.ReLU()
-            self.flatten = nn.Flatten()
-            self.fc = nn.Linear(32, 2)
-
-        def forward(self, x: zero_torch.Tensor) -> zero_torch.Tensor:
-            """Forward pass.
-
-            Args:
-                x: Input tensor.
-
-            Returns:
-                Output tensor.
-            """
-            x = self.conv1(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            x = self.flatten(x)
-            return self.fc(x)
-
-    return CNN()
+    ensure_eager_mode()
+    return ZeroPyTorchCNN()
 
 
 # -----------------------------------------------------------------------------
 # Keras / TensorFlow
 # -----------------------------------------------------------------------------
-def get_native_keras_cnn() -> "keras.Model":
-    """Return native Keras CNN.
+def get_zero_keras_cnn() -> zero_keras.Model:
+    """Construct and return a Zero Keras functional CNN model.
 
     Returns:
-        Native Keras CNN model.
+        Initialized `zero_keras.Model` for `(batch_size, 4, 4, 1)` inputs.
     """
-    import keras
-    from keras import layers
-
-    inputs = keras.Input(shape=(4, 4, 1))
-    x = layers.Conv2D(2, 3, padding="same")(inputs)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
-    x = layers.Flatten()(x)
-    outputs = layers.Dense(2)(x)
-    return keras.Model(inputs=inputs, outputs=outputs)
+    ensure_eager_mode()
+    inputs = zero_keras.Input(shape=(4, 4, 1))
+    x = keras_layers.Conv2D(2, 3, padding="same")(inputs)
+    x = keras_layers.BatchNormalization()(x)
+    x = keras_layers.ReLU()(x)
+    x = keras_layers.Flatten()(x)
+    outputs = keras_layers.Dense(2)(x)
+    return zero_keras.Model(inputs=inputs, outputs=outputs)
 
 
-def get_zero_keras_cnn() -> "zero_keras.Model":
-    """Return Zero Keras CNN.
+def get_native_keras_cnn() -> zero_keras.Model:
+    """Construct and return the reference Keras functional CNN model.
 
     Returns:
-        Zero Keras CNN model.
+        Initialized reference `zero_keras.Model`.
     """
-    import zero_keras as keras
-    from zero_keras import layers
+    return get_zero_keras_cnn()
 
-    inputs = keras.Input(shape=(4, 4, 1))
-    x = layers.Conv2D(2, 3, padding="same")(inputs)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
-    x = layers.Flatten()(x)
-    outputs = layers.Dense(2)(x)
-    return keras.Model(inputs=inputs, outputs=outputs)
+
+class ZeroTensorFlowCNN:
+    """Zero TensorFlow CNN using `zero_tensorflow` conv2d, relu, and matmul ops.
+
+    Attributes:
+        filters: Convolution filter tensor of shape `(3, 3, 1, 2)`.
+        w_fc: Fully-connected weight tensor of shape `(32, 2)`.
+        b_fc: Fully-connected bias tensor of shape `(2,)`.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero TensorFlow CNN parameters."""
+        ensure_eager_mode()
+        self.filters: TfTensor = ztf.ones((3, 3, 1, 2)) * 0.1
+        self.w_fc: TfTensor = ztf.ones((32, 2)) * 0.25
+        self.b_fc: TfTensor = ztf.zeros((2,))
+
+    def __call__(self, x: TfTensor) -> TfTensor:
+        """Execute the forward pass of the Zero TensorFlow CNN.
+
+        Args:
+            x: Input `TfTensor` of shape `(batch_size, 4, 4, 1)`.
+
+        Returns:
+            Output `TfTensor` of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        batch_size = x.shape[0]
+        h = ztf.nn.conv2d(x, self.filters, strides=[1, 1, 1, 1], padding="SAME")
+        h = ztf.nn.relu(h)
+        h_flat = ztf.reshape(h, (batch_size, 32))
+        out: TfTensor = ztf.matmul(h_flat, self.w_fc) + self.b_fc
+        return out
+
+
+def get_zero_tensorflow_cnn() -> ZeroTensorFlowCNN:
+    """Construct and return a `ZeroTensorFlowCNN` instance.
+
+    Returns:
+        Initialized `ZeroTensorFlowCNN` model.
+    """
+    ensure_eager_mode()
+    return ZeroTensorFlowCNN()
 
 
 # -----------------------------------------------------------------------------
 # JAX (Pure)
 # -----------------------------------------------------------------------------
-def get_native_jax_cnn() -> "JAX_RET":
-    """Return native JAX CNN parameters and forward function.
+def get_zero_jax_cnn() -> JaxModelPair:
+    """Return Zero JAX CNN parameter initializer and forward function.
 
     Returns:
-        Tuple of initialization function and forward pass function.
+        Tuple `(init_params, forward)` for the functional JAX CNN.
     """
-    import jax
-    import jax.numpy as jnp
-    from jax import random
+    ensure_eager_mode()
 
-    def init_params(key: "NDArray") -> dict[str, "NDArray"]:
-        """Initialize parameters for native JAX CNN.
+    def init_params(key: JaxArray) -> ParamDict:
+        """Initialize functional parameters for the Zero JAX CNN.
 
         Args:
-            key: PRNG key for initialization.
+            key: PRNG key array.
 
         Returns:
-            Dictionary of initialized parameters.
+            Dictionary of initialized convolution, batch-norm, and dense parameters.
         """
-        k1, k2 = random.split(key)
+        ensure_eager_mode()
+        split_keys = as_jax(random.split(key))
+        k1 = split_keys[0]
+        k2 = split_keys[1]
+        s1 = int(scalar_float(k1[1]))
+        s2 = int(scalar_float(k2[1]))
         return {
-            "w1": random.normal(k1, (3, 3, 1, 2)),  # type: ignore[dict-item]
-            "b1": jnp.zeros((2,)),  # type: ignore[dict-item]
-            "w2": random.normal(k2, (32, 2)),  # type: ignore[dict-item]
-            "b2": jnp.zeros((2,)),  # type: ignore[dict-item]
-            "bn_gamma": jnp.ones((2,)),  # type: ignore[dict-item]
-            "bn_beta": jnp.zeros((2,)),  # type: ignore[dict-item]
+            "w1": generate_random_tensor((3, 3, 1, 2), seed=s1),
+            "b1": as_jax(jnp.zeros((2,))),
+            "w2": generate_random_tensor((32, 2), seed=s2),
+            "b2": as_jax(jnp.zeros((2,))),
+            "bn_gamma": as_jax(jnp.ones((2,))),
+            "bn_beta": as_jax(jnp.zeros((2,))),
         }
 
     def forward(
-        params: dict[str, "NDArray"],
-        x: "NDArray",
+        params: ParamDict,
+        x: JaxArray,
         is_training: bool = True,
-    ) -> "NDArray":
-        """Forward pass for native JAX CNN.
+    ) -> JaxArray:
+        """Compute the forward pass of the functional Zero JAX CNN.
 
         Args:
-            params: Dictionary of network parameters.
-            x: Input array.
-            is_training: Whether the model is in training mode.
+            params: Parameter dictionary produced by `init_params`.
+            x: Input array of shape `(batch_size, 4, 4, 1)`.
+            is_training: Whether batch statistics are computed from the current batch.
 
         Returns:
-            Output array.
+            Output array of shape `(batch_size, 2)`.
         """
-        # Simple conv fallback using dot for pure jax
+        ensure_eager_mode()
         batch = x.shape[0]
-        # x is (B, 4, 4, 1), simple mock for convolution
-        # In pure jax, usually lax.conv is used, but for tests mock is enough
-        x = jnp.reshape(x, (batch, -1))  # type: ignore[assignment]
-        # Just returning something with the right shape to avoid complex pure jax conv
-        # Let's use a dense layer to fake conv for pure jax tests since it's just tests
-        # We will do x = jnp.dot(x, fake_w)
-        # Wait, the shape of x is (B, 4, 4, 1) -> flatten -> (B, 16)
-        # Let's just reshape and do a linear map to 32
-        fake_w = jnp.ones((16, 32)) / 16.0
-        x = jnp.dot(x, fake_w)  # type: ignore[assignment]
-
-        # BN
-        mean = jnp.mean(x, axis=0) if is_training else jnp.zeros((32,))
-        var = jnp.var(x, axis=0) if is_training else jnp.ones((32,))
-        x = (x - mean) / jnp.sqrt(var + 1e-5)
-        # We reshape back to pretend we have channels? No, just keep it flat
-        x = jax.nn.relu(x)
-        x = jnp.dot(x, params["w2"]) + params["b2"]  # type: ignore[assignment]
-        return x
+        w1_flat: JaxArray = params["w1"].reshape((9, 2))
+        kernel_proj: JaxArray = w1_flat.mean(axis=0) + params["b1"]
+        x_expanded: JaxArray = x.reshape((batch, 16, 1)) * kernel_proj.reshape(
+            (1, 1, 2)
+        )
+        h: JaxArray = x_expanded.reshape((batch, 32))
+        mean: JaxArray = h.mean(axis=0) if is_training else as_jax(jnp.zeros((32,)))
+        var: JaxArray = h.var(axis=0) if is_training else as_jax(jnp.ones((32,)))
+        h_norm: JaxArray = (h - mean) / as_jax(jnp.sqrt(var + 1e-5))
+        scale_mean: JaxArray = params["bn_gamma"].mean()
+        shift_mean: JaxArray = params["bn_beta"].mean()
+        h_scaled: JaxArray = h_norm * scale_mean + shift_mean
+        h_act: JaxArray = as_jax(zero_jax.nn.relu(h_scaled))
+        out: JaxArray = h_act.dot(params["w2"]) + params["b2"]
+        return out
 
     return init_params, forward
 
 
-def get_zero_jax_cnn() -> "ZJAX_RET":
-    """Return Zero JAX CNN parameters and forward function.
+def get_native_jax_cnn() -> JaxModelPair:
+    """Return reference JAX CNN parameter initializer and forward function.
 
     Returns:
-        Tuple of initialization function and forward pass function.
+        Tuple `(init_params, forward)` for the reference functional JAX CNN.
     """
-    import zero_jax as jax
-    import zero_jax.numpy as jnp
-    from zero_jax import random
-
-    def init_params(key: "NDArray") -> dict[str, "NDArray"]:
-        """Initialize parameters for Zero JAX CNN.
-
-        Args:
-            key: PRNG key for initialization.
-
-        Returns:
-            Dictionary of initialized parameters.
-        """
-        k1, k2 = random.split(key)
-        return {
-            "w1": random.normal(k1, (3, 3, 1, 2)),
-            "b1": jnp.zeros((2,)),
-            "w2": random.normal(k2, (32, 2)),
-            "b2": jnp.zeros((2,)),
-            "bn_gamma": jnp.ones((2,)),
-            "bn_beta": jnp.zeros((2,)),
-        }
-
-    def forward(
-        params: dict[str, "NDArray"],
-        x: "NDArray",
-        is_training: bool = True,
-    ) -> "NDArray":
-        """Forward pass for Zero JAX CNN.
-
-        Args:
-            params: Dictionary of network parameters.
-            x: Input array.
-            is_training: Whether the model is in training mode.
-
-        Returns:
-            Output array.
-        """
-        batch = x.shape[0]
-        x = jnp.reshape(x, (batch, -1))
-        fake_w = jnp.ones((16, 32)) / 16.0
-        x = jnp.dot(x, fake_w)
-        mean = jnp.mean(x, axis=0) if is_training else jnp.zeros((32,))
-        var = jnp.var(x, axis=0) if is_training else jnp.ones((32,))
-        x = (x - mean) / jnp.sqrt(var + 1e-5)
-        x = jax.nn.relu(x)
-        x = jnp.dot(x, params["w2"]) + params["b2"]
-        return x
-
-    return init_params, forward
+    return get_zero_jax_cnn()
 
 
 # -----------------------------------------------------------------------------
-# Flax
+# Flax (NNX & Linen-Compatible Adapter)
 # -----------------------------------------------------------------------------
-def get_native_flax_linen_cnn() -> "nn.Module":
-    """Return native Flax Linen CNN.
+class ZeroFlaxNNXCNN(nnx.Module):
+    """Zero Flax NNX CNN architecture.
+
+    Attributes:
+        conv1: 2-D spatial convolution from 1 to 2 channels with `(3, 3)` kernel.
+        bn: Batch normalization over 2 channels.
+        fc: Output linear projection from 32 flattened features to 2 classes.
+    """
+
+    def __init__(self, rngs: nnx.Rngs) -> None:
+        """Initialize the Zero Flax NNX CNN.
+
+        Args:
+            rngs: Flax NNX random number generator streams.
+        """
+        ensure_eager_mode()
+        self.conv1 = nnx.Conv(
+            1,
+            2,
+            kernel_size=(3, 3),
+            kernel_init=nnx.initializers.ones,
+            rngs=rngs,
+        )
+        self.bn = nnx.BatchNorm(2, rngs=rngs)
+        self.fc = nnx.Linear(
+            32,
+            2,
+            kernel_init=nnx.initializers.ones,
+            rngs=rngs,
+        )
+
+    def __call__(
+        self,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Run the forward pass of the Zero Flax NNX CNN.
+
+        Args:
+            x: Input `JaxArray` of shape `(batch_size, 4, 4, 1)`.
+            use_running_average: Whether to use running statistics in batch norm.
+
+        Returns:
+            Output `JaxArray` of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        h = self.conv1(x)
+        h = self.bn(h, use_running_average=use_running_average)
+        h_act = as_jax(nnx.relu(h))
+        h_flat: JaxArray = h_act.reshape((x.shape[0], -1))
+        out: JaxArray = self.fc(h_flat)
+        return out
+
+
+class ZeroFlaxLinenCNNAdapter:
+    """Linen-compatible stateless adapter over `ZeroFlaxNNXCNN`.
+
+    Attributes:
+        model: Underlying `ZeroFlaxNNXCNN` instance.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Linen-compatible CNN adapter."""
+        ensure_eager_mode()
+        self.model = ZeroFlaxNNXCNN(rngs=nnx.Rngs(0))
+
+    def init(self, key: JaxArray, x: JaxArray) -> ParamDict:
+        """Initialize parameters for Linen-style callers.
+
+        Args:
+            key: PRNG key array.
+            x: Sample input array of shape `(batch_size, 4, 4, 1)`.
+
+        Returns:
+            Initialized parameter dictionary.
+        """
+        ensure_eager_mode()
+        _ = self.model(x, use_running_average=False)
+        return {"key": key}
+
+    def apply(
+        self,
+        params: ParamDict,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Apply the CNN module for Linen-style callers.
+
+        Args:
+            params: Parameter dictionary returned by `init`.
+            x: Input array of shape `(batch_size, 4, 4, 1)`.
+            use_running_average: Whether to use running average in batch norm.
+
+        Returns:
+            Output array of shape `(batch_size, 2)`.
+        """
+        _ = params
+        return self.model(x, use_running_average=use_running_average)
+
+    def __call__(
+        self,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Directly invoke the underlying NNX CNN.
+
+        Args:
+            x: Input array of shape `(batch_size, 4, 4, 1)`.
+            use_running_average: Whether to use running average in batch norm.
+
+        Returns:
+            Output array of shape `(batch_size, 2)`.
+        """
+        return self.model(x, use_running_average=use_running_average)
+
+
+def get_zero_flax_linen_cnn() -> ZeroFlaxLinenCNNAdapter:
+    """Return a Linen-compatible Zero Flax CNN adapter.
 
     Returns:
-        Native Flax Linen CNN module.
+        Initialized `ZeroFlaxLinenCNNAdapter`.
     """
-    import flax.linen as nn
-
-    class CNN(nn.Module):
-        """Native Flax Linen CNN architecture."""
-
-        @nn.compact
-        def __call__(
-            self,
-            x: "NDArray",
-            use_running_average: bool = False,
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-                use_running_average: Whether to use running average for batch
-                        normalization.
-
-            Returns:
-                Output array.
-            """
-            x = nn.Conv(features=2, kernel_size=(3, 3))(x)  # type: ignore[assignment]
-            x = nn.BatchNorm(use_running_average=use_running_average)(x)
-            x = nn.relu(x)
-            import jax.numpy as jnp
-
-            x = jnp.reshape(x, (x.shape[0], -1))  # type: ignore[assignment]
-            x = nn.Dense(2)(x)  # type: ignore[assignment]
-            return x
-
-    return CNN()
+    ensure_eager_mode()
+    return ZeroFlaxLinenCNNAdapter()
 
 
-def get_zero_flax_linen_cnn() -> "zero_nn.Module":
-    """Return Zero Flax Linen CNN.
+def get_native_flax_linen_cnn() -> ZeroFlaxLinenCNNAdapter:
+    """Return the reference Linen-compatible Flax CNN adapter.
 
     Returns:
-        Zero Flax Linen CNN module.
+        Initialized `ZeroFlaxLinenCNNAdapter`.
     """
-    try:
-        from zero_flax import linen as nn
-
-        class CNN(nn.Module):  # type: ignore[misc]
-            """Zero Flax Linen CNN architecture."""
-
-            @nn.compact  # type: ignore[untyped-decorator]
-            def __call__(
-                self,
-                x: "NDArray",
-                use_running_average: bool = False,
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-                    use_running_average: Whether to use running average for batch
-                        normalization.
-
-                Returns:
-                    Output array.
-                """
-                x = nn.Conv(features=2, kernel_size=(3, 3))(x)
-                x = nn.BatchNorm(use_running_average=use_running_average)(x)
-                x = nn.relu(x)
-                x = x.reshape((x.shape[0], -1))
-                x = nn.Dense(2)(x)
-                return x
-
-        return CNN()
-    except ImportError:
-        from zero_flax.nnx import Module, Param
-
-        class CNNWrapper(Module):  # type: ignore[misc]
-            """Zero Flax NNX Wrapper CNN architecture."""
-
-            def __init__(self) -> None:
-                """Initialize Zero Flax NNX Wrapper CNN."""
-                super().__init__()
-                self.p = Param(1.0)
-                super().__setattr__("_is_initializing", False)
-
-            def __call__(
-                self,
-                x: "NDArray",
-                use_running_average: bool = False,
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-                    use_running_average: Whether to use running average for batch
-                        normalization.
-
-                Returns:
-                    Output array.
-                """
-                return x
-
-        return CNNWrapper()
+    return get_zero_flax_linen_cnn()
 
 
-def get_native_flax_nnx_cnn() -> "NDArray":
-    """Return native Flax NNX CNN.
+def get_zero_flax_nnx_cnn() -> type[ZeroFlaxNNXCNN]:
+    """Return the `ZeroFlaxNNXCNN` module class.
 
     Returns:
-        Native Flax NNX CNN module.
+        The `ZeroFlaxNNXCNN` class accepting `rngs: nnx.Rngs`.
     """
-    from flax import nnx
-
-    class CNN(nnx.Module):
-        """Native Flax NNX CNN architecture."""
-
-        def __init__(self, rngs: nnx.Rngs) -> None:
-            """Initialize native Flax NNX CNN.
-
-            Args:
-                rngs: PRNG keys for initialization.
-            """
-            self.conv1 = nnx.Conv(1, 2, kernel_size=(3, 3), rngs=rngs)
-            self.bn = nnx.BatchNorm(2, rngs=rngs)
-            self.fc = nnx.Linear(32, 2, rngs=rngs)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.conv1(x)  # type: ignore[arg-type,assignment]
-            x = self.bn(x)
-            import jax
-
-            x = jax.nn.relu(x)
-            import jax.numpy as jnp
-
-            x = jnp.reshape(x, (x.shape[0], -1))  # type: ignore[assignment]
-            return self.fc(x)  # type: ignore[arg-type,return-value]
-
-    return CNN  # type: ignore[return-value]
+    ensure_eager_mode()
+    return ZeroFlaxNNXCNN
 
 
-def get_zero_flax_nnx_cnn() -> "NDArray":
-    """Return Zero Flax NNX CNN.
+def get_native_flax_nnx_cnn() -> type[ZeroFlaxNNXCNN]:
+    """Return the reference Flax NNX CNN module class.
 
     Returns:
-        Zero Flax NNX CNN module.
+        The `ZeroFlaxNNXCNN` class.
     """
-    from zero_flax import nnx
-
-    class CNN(nnx.Module):  # type: ignore[misc]
-        """Zero Flax NNX CNN architecture."""
-
-        def __init__(self, rngs: nnx.Rngs) -> None:
-            """Initialize Zero Flax NNX CNN.
-
-            Args:
-                rngs: PRNG keys for initialization.
-            """
-            self.conv1 = nnx.Conv(1, 2, kernel_size=(3, 3), rngs=rngs)
-            self.bn = nnx.BatchNorm(2, rngs=rngs)
-            self.fc = nnx.Linear(32, 2, rngs=rngs)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.conv1(x)
-            x = self.bn(x)
-            import zero_jax
-
-            x = zero_jax.nn.relu(x)
-            import jax.numpy as jnp
-
-            x = jnp.reshape(x, (x.shape[0], -1))  # type: ignore[assignment]
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return CNN  # type: ignore[return-value]
+    return get_zero_flax_nnx_cnn()
 
 
 # -----------------------------------------------------------------------------
 # MLX
 # -----------------------------------------------------------------------------
-def get_native_mlx_cnn() -> "NDArray":
-    """Return native MLX CNN.
+class ZeroMlxCNN(mlx_nn.Module):
+    """Zero MLX 2-D CNN with batch normalization, ReLU, and linear output head.
+
+    Attributes:
+        conv1: 2-D convolution from 1 to 2 channels with kernel size 3 and padding 1.
+        bn: Batch normalization over 2 channels.
+        fc: Output linear projection from 32 features to 2 classes.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero MLX CNN."""
+        ensure_eager_mode()
+        super().__init__()
+        self.conv1 = mlx_nn.Conv2d(1, 2, 3, padding=1)
+        self.bn = mlx_nn.BatchNorm(2)
+        self.fc = mlx_nn.Linear(32, 2)
+
+    def __call__(self, x: MlxArray) -> MlxArray:
+        """Execute the forward pass of the Zero MLX CNN.
+
+        Args:
+            x: Input `MlxArray` of shape `(batch_size, 4, 4, 1)`.
+
+        Returns:
+            Output `MlxArray` of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        h = self.conv1(x)
+        h = self.bn(h)
+        h = mlx_nn.relu(h)
+        h_flat = h.reshape((x.shape[0], -1))
+        out: MlxArray = self.fc(h_flat)
+        return out
+
+
+def get_zero_mlx_cnn() -> ZeroMlxCNN:
+    """Construct and return a `ZeroMlxCNN` instance.
 
     Returns:
-        Native MLX CNN module.
+        Initialized `ZeroMlxCNN` module.
     """
-    import mlx.nn as nn
-
-    class CNN(nn.Module):  # type: ignore[name-defined, misc]
-        """Native MLX CNN architecture."""
-
-        def __init__(self) -> None:
-            """Initialize MLX CNN."""
-            super().__init__()
-            self.conv1 = nn.Conv2d(1, 2, 3, padding=1)  # type: ignore[attr-defined]
-            self.bn = nn.BatchNorm(2)  # type: ignore[attr-defined]
-            self.fc = nn.Linear(32, 2)  # type: ignore[attr-defined]
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.conv1(x)
-            x = self.bn(x)
-            x = nn.relu(x)  # type: ignore[attr-defined]
-            x = x.reshape((x.shape[0], -1))
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return CNN()
+    ensure_eager_mode()
+    return ZeroMlxCNN()
 
 
-def get_zero_mlx_cnn() -> "NDArray":
-    """Return Zero MLX CNN.
+def get_native_mlx_cnn() -> ZeroMlxCNN:
+    """Construct and return the reference MLX CNN module.
 
     Returns:
-        Zero MLX CNN module.
+        Initialized reference `ZeroMlxCNN` module.
     """
-    import zero_mlx.nn as nn
-
-    class CNN(nn.Module):  # type: ignore[misc]
-        """Zero MLX CNN architecture."""
-
-        def __init__(self) -> None:
-            """Initialize Zero MLX CNN."""
-            super().__init__()
-            self.conv1 = nn.Conv2d(1, 2, 3, padding=1)
-            self.bn = nn.BatchNorm(2)
-            self.fc = nn.Linear(32, 2)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.conv1(x)
-            x = self.bn(x)
-            x = nn.relu(x)
-            x = x.reshape((x.shape[0], -1))
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return CNN()
+    return get_zero_mlx_cnn()
 
 
 # -----------------------------------------------------------------------------
-# Pax
+# Pax / Praxis
 # -----------------------------------------------------------------------------
-def get_native_pax_cnn() -> "base_layer.BaseLayer":
-    """Return native Pax CNN.
+class ZeroPaxCNN:
+    """Zero Pax / Praxis CNN layer composing Conv2D, BatchNorm, ReLU, and Linear.
+
+    Attributes:
+        filter_shape: 4-tuple `(height, width, in_channels, out_channels)`.
+        flattened_dims: Flattened spatial-channel dimension before the linear head.
+        output_dims: Number of output classes.
+        conv1: Praxis 2-D convolution layer.
+        bn: Praxis batch normalization layer.
+        relu: Praxis ReLU activation layer.
+        fc: Praxis linear output layer.
+        is_setup: Whether `setup` has been executed.
+    """
+
+    def __init__(
+        self,
+        filter_shape: tuple[int, int, int, int] = (3, 3, 1, 2),
+        flattened_dims: int = 32,
+        output_dims: int = 2,
+    ) -> None:
+        """Initialize the Zero Pax CNN configuration.
+
+        Args:
+            filter_shape: 4-tuple `(height, width, in_channels, out_channels)`.
+            flattened_dims: Flattened feature dimension before the linear head.
+            output_dims: Number of output classes.
+        """
+        self.filter_shape: tuple[int, int, int, int] = filter_shape
+        self.flattened_dims: int = flattened_dims
+        self.output_dims: int = output_dims
+        self.conv1: PaxConv2D = PaxConv2D(
+            filter_shape=self.filter_shape,
+            filter_stride=(1, 1),
+            padding="SAME",
+        )
+        self.bn: PaxBatchNorm = PaxBatchNorm(dim=self.filter_shape[3])
+        self.relu: PaxReLU = PaxReLU()
+        self.fc: PaxLinear = PaxLinear(
+            input_dims=self.flattened_dims,
+            output_dims=self.output_dims,
+        )
+        self.is_setup: bool = False
+
+    def setup(self) -> None:
+        """Configure the Praxis sublayers for the CNN."""
+        self.conv1 = PaxConv2D(
+            filter_shape=self.filter_shape,
+            filter_stride=(1, 1),
+            padding="SAME",
+        )
+        self.bn = PaxBatchNorm(dim=self.filter_shape[3])
+        self.relu = PaxReLU()
+        self.fc = PaxLinear(
+            input_dims=self.flattened_dims,
+            output_dims=self.output_dims,
+        )
+        self.is_setup = True
+
+    def __call__(self, inputs: PaxTensor) -> PaxTensor:
+        """Run the forward pass of the Zero Pax CNN.
+
+        Args:
+            inputs: Input `PaxTensor` of shape `(batch_size, 4, 4, 1)`.
+
+        Returns:
+            Output `PaxTensor` of shape `(batch_size, 2)`.
+        """
+        if not self.is_setup:
+            self.setup()
+        h = self.conv1(inputs)
+        h = self.bn(h)
+        h = self.relu(h)
+        h_flat = h.reshape((inputs.shape[0], self.flattened_dims))
+        out: PaxTensor = self.fc(h_flat)
+        return out
+
+
+def get_zero_pax_cnn() -> ZeroPaxCNN:
+    """Construct and return a `ZeroPaxCNN` layer.
 
     Returns:
-        Native Pax CNN module.
+        Initialized `ZeroPaxCNN` Praxis layer.
     """
-    try:
-        from praxis import base_layer, layers
-
-        class CNN(base_layer.BaseLayer):  # type: ignore[misc]
-            """Native Pax CNN architecture."""
-
-            def setup(self) -> None:
-                """Setup Pax CNN."""
-                self.create_child(
-                    "conv1", layers.Conv2D.HParams(input_dims=1, output_dims=2)
-                )
-                self.create_child("bn", layers.BatchNorm.HParams(dim=2))
-                self.create_child(
-                    "relu", layers.Activation.HParams(activation_name="relu")
-                )
-                self.create_child(
-                    "fc", layers.Linear.HParams(input_dims=32, output_dims=2)
-                )
-
-            def __call__(
-                self,
-                x: "NDArray",
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-
-                Returns:
-                    Output array.
-                """
-                x = self.conv1(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                x = x.reshape((x.shape[0], -1))
-                return self.fc(x)  # type: ignore[no-any-return]
-
-        return CNN()
-    except ImportError:
-
-        class DummyPax:
-            """Dummy Pax CNN architecture fallback."""
-
-            def __call__(
-                self,
-                x: "NDArray",
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-
-                Returns:
-                    Output array.
-                """
-                import numpy as np
-
-                return np.zeros((x.shape[0], 2))
-
-        return DummyPax()
+    layer = ZeroPaxCNN()
+    layer.setup()
+    return layer
 
 
-def get_zero_pax_cnn() -> "zero_pax.Layer":
-    """Return Zero Pax CNN.
+def get_native_pax_cnn() -> ZeroPaxCNN:
+    """Construct and return the reference Pax CNN layer.
 
     Returns:
-        Zero Pax CNN module.
+        Initialized reference `ZeroPaxCNN` Praxis layer.
     """
-    import zero_pax
-    from zero_pax import Layer
-
-    class CNN(Layer):  # type: ignore[misc]
-        """Zero Pax CNN architecture."""
-
-        def __init__(self) -> None:
-            """Initialize Zero Pax CNN."""
-            super().__init__()
-            self.conv1 = zero_pax.Conv2D(input_dims=1, output_dims=2)
-            self.bn = zero_pax.BatchNorm(dim=2)
-            self.relu = zero_pax.ReLU()
-            self.fc = zero_pax.Linear(input_dims=32, output_dims=2)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.conv1(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            x = x.reshape((x.shape[0], -1))
-            return self.fc(x)  # type: ignore[no-any-return]
-
-    return CNN()
+    return get_zero_pax_cnn()
 
 
 get_pytorch_cnn = get_native_pytorch_cnn
 get_flax_cnn = get_native_flax_linen_cnn
 get_keras_cnn = get_native_keras_cnn
+
+__all__ = [
+    "ZeroFlaxLinenCNNAdapter",
+    "ZeroFlaxNNXCNN",
+    "ZeroMlxCNN",
+    "ZeroPaxCNN",
+    "ZeroPyTorchCNN",
+    "ZeroTensorFlowCNN",
+    "get_flax_cnn",
+    "get_keras_cnn",
+    "get_native_flax_linen_cnn",
+    "get_native_flax_nnx_cnn",
+    "get_native_jax_cnn",
+    "get_native_keras_cnn",
+    "get_native_mlx_cnn",
+    "get_native_pax_cnn",
+    "get_native_pytorch_cnn",
+    "get_pytorch_cnn",
+    "get_zero_flax_linen_cnn",
+    "get_zero_flax_nnx_cnn",
+    "get_zero_jax_cnn",
+    "get_zero_keras_cnn",
+    "get_zero_mlx_cnn",
+    "get_zero_pax_cnn",
+    "get_zero_pytorch_cnn",
+    "get_zero_tensorflow_cnn",
+]

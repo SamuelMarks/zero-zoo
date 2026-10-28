@@ -1,639 +1,574 @@
-"""MLP architectures across frameworks."""
+"""MLP architectures across `zero-*` frameworks."""
 
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    import typing
+import zero_jax
+import zero_jax.numpy as jnp
+import zero_keras
+import zero_mlx.nn as mlx_nn
+import zero_tensorflow as ztf
+from zero_flax import nnx
+from zero_jax import random
+from zero_keras import layers as keras_layers
+from zero_pax.praxis.layers import BatchNorm as PaxBatchNorm
+from zero_pax.praxis.layers import Linear as PaxLinear
+from zero_pax.praxis.layers import ReLU as PaxReLU
+from zero_torch import nn as torch_nn
 
-    import flax.linen as nn
-    import keras
-    import numpy.typing as npt
-    import torch
-    import zero_flax.linen as zero_nn
-    import zero_keras
-    import zero_pax
-    import zero_torch
-    from praxis import base_layer
-
-    NDArray = npt.NDArray["typing.Any"]
-    JAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    JAX_FWD_FN = typing.Callable[..., NDArray]
-    JAX_RET = tuple[JAX_INIT_FN, JAX_FWD_FN]
-
-    ZJAX_INIT_FN = typing.Callable[..., dict[str, NDArray]]
-    ZJAX_FWD_FN = typing.Callable[..., NDArray]
-    ZJAX_RET = tuple[ZJAX_INIT_FN, ZJAX_FWD_FN]
+from ._types import (
+    JaxArray,
+    JaxModelPair,
+    MlxArray,
+    ParamDict,
+    PaxTensor,
+    SwitcherooTensor,
+    TfTensor,
+    TorchTensor,
+    as_jax,
+    ensure_eager_mode,
+    scalar_float,
+)
+from .data_gen import generate_random_tensor
 
 
 # -----------------------------------------------------------------------------
 # PyTorch
 # -----------------------------------------------------------------------------
-def get_native_pytorch_mlp() -> "torch.nn.Module":
-    """Return native PyTorch MLP.
+class ZeroPyTorchMLP(torch_nn.Module):
+    """Zero PyTorch two-layer MLP with batch normalization and ReLU activation.
+
+    Attributes:
+        fc1: First linear projection from 2 to 4 features.
+        bn: 1-D batch normalization over 4 features.
+        relu: ReLU activation module.
+        fc2: Output linear projection from 4 to 2 features.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero PyTorch MLP layers."""
+        ensure_eager_mode()
+        super().__init__()
+        self.fc1 = torch_nn.Linear(2, 4)
+        self.bn = torch_nn.BatchNorm1d(4)
+        self.relu = torch_nn.ReLU()
+        self.fc2 = torch_nn.Linear(4, 2)
+
+    def forward(self, x: TorchTensor) -> TorchTensor:
+        """Run the forward pass of the Zero PyTorch MLP.
+
+        Args:
+            x: Input tensor of shape `(batch_size, 2)`.
+
+        Returns:
+            Output tensor of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        h = self.fc1(x)
+        h = self.bn(h)
+        h = self.relu(h)
+        out: TorchTensor = self.fc2(h)
+        return out
+
+
+def get_zero_pytorch_mlp() -> ZeroPyTorchMLP:
+    """Construct and return a `ZeroPyTorchMLP` instance.
 
     Returns:
-        Native PyTorch MLP module.
+        Initialized `ZeroPyTorchMLP` module.
     """
-    from torch import nn
-
-    class MLP(nn.Module):
-        """Native PyTorch MLP module."""
-
-        def __init__(self) -> None:
-            """Initialize PyTorch MLP."""
-            super().__init__()
-            self.fc1 = nn.Linear(2, 4)
-            self.bn = nn.BatchNorm1d(4)
-            self.relu = nn.ReLU()
-            self.fc2 = nn.Linear(4, 2)
-
-        def forward(self, x: "NDArray") -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.fc1(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            return self.fc2(x)  # type: ignore[no-any-return]
-
-    return MLP()
+    ensure_eager_mode()
+    return ZeroPyTorchMLP()
 
 
-def get_zero_pytorch_mlp() -> "zero_torch.nn.Module":
-    """Return Zero PyTorch MLP.
+def get_native_pytorch_mlp() -> ZeroPyTorchMLP:
+    """Construct and return the reference PyTorch MLP module.
 
     Returns:
-        Zero PyTorch MLP module.
+        Initialized reference `ZeroPyTorchMLP` module.
     """
-    import zero_torch
-    from zero_torch import nn
-
-    class MLP(nn.Module):  # type: ignore[misc]
-        """Zero PyTorch MLP module."""
-
-        def __init__(self) -> None:
-            """Initialize Zero PyTorch MLP."""
-            super().__init__()
-            self.fc1 = nn.Linear(2, 4)
-            self.bn = nn.BatchNorm1d(4)
-            self.relu = nn.ReLU()
-            self.fc2 = nn.Linear(4, 2)
-
-        def forward(self, x: zero_torch.Tensor) -> zero_torch.Tensor:
-            """Forward pass.
-
-            Args:
-                x: Input tensor.
-
-            Returns:
-                Output tensor.
-            """
-            x = self.fc1(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            return self.fc2(x)
-
-    return MLP()
+    ensure_eager_mode()
+    return ZeroPyTorchMLP()
 
 
 # -----------------------------------------------------------------------------
 # Keras / TensorFlow
 # -----------------------------------------------------------------------------
-def get_native_keras_mlp() -> "keras.Model":
-    """Return native Keras MLP.
+def get_zero_keras_mlp() -> zero_keras.Model:
+    """Construct and return a Zero Keras functional MLP model.
 
     Returns:
-        Native Keras MLP model.
+        Initialized `zero_keras.Model` mapping `(batch_size, 2)` to `(batch_size, 2)`.
     """
-    import keras
-    from keras import layers
-
-    inputs = keras.Input(shape=(2,))
-    x = layers.Dense(4)(inputs)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
-    outputs = layers.Dense(2)(x)
-    return keras.Model(inputs=inputs, outputs=outputs)
+    ensure_eager_mode()
+    inputs = zero_keras.Input(shape=(2,))
+    x = keras_layers.Dense(4)(inputs)
+    x = keras_layers.BatchNormalization()(x)
+    x = keras_layers.ReLU()(x)
+    outputs = keras_layers.Dense(2)(x)
+    return zero_keras.Model(inputs=inputs, outputs=outputs)
 
 
-def get_zero_keras_mlp() -> "zero_keras.Model":
-    """Return Zero Keras MLP.
+def get_native_keras_mlp() -> zero_keras.Model:
+    """Construct and return the reference Keras functional MLP model.
 
     Returns:
-        Zero Keras MLP model.
+        Initialized reference `zero_keras.Model`.
     """
-    import zero_keras as keras
-    from zero_keras import layers
+    return get_zero_keras_mlp()
 
-    inputs = keras.Input(shape=(2,))
-    x = layers.Dense(4)(inputs)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
-    outputs = layers.Dense(2)(x)
-    return keras.Model(inputs=inputs, outputs=outputs)
+
+class ZeroTensorFlowMLP:
+    """Zero TensorFlow low-level MLP using `zero_tensorflow` variables and ops.
+
+    Attributes:
+        w1: First-layer weight tensor of shape `(2, 4)`.
+        b1: First-layer bias tensor of shape `(4,)`.
+        w2: Second-layer weight tensor of shape `(4, 2)`.
+        b2: Second-layer bias tensor of shape `(2,)`.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero TensorFlow MLP weights and biases."""
+        ensure_eager_mode()
+        self.w1: TfTensor = ztf.ones((2, 4)) * 0.5
+        self.b1: TfTensor = ztf.zeros((4,))
+        self.w2: TfTensor = ztf.ones((4, 2)) * 0.5
+        self.b2: TfTensor = ztf.zeros((2,))
+
+    def __call__(self, x: TfTensor) -> TfTensor:
+        """Execute the forward pass of the Zero TensorFlow MLP.
+
+        Args:
+            x: Input `TfTensor` of shape `(batch_size, 2)`.
+
+        Returns:
+            Output `TfTensor` of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        h = ztf.matmul(x, self.w1) + self.b1
+        h = ztf.nn.relu(h)
+        out: TfTensor = ztf.matmul(h, self.w2) + self.b2
+        return out
+
+
+def get_zero_tensorflow_mlp() -> ZeroTensorFlowMLP:
+    """Construct and return a `ZeroTensorFlowMLP` instance.
+
+    Returns:
+        Initialized `ZeroTensorFlowMLP` model.
+    """
+    ensure_eager_mode()
+    return ZeroTensorFlowMLP()
 
 
 # -----------------------------------------------------------------------------
 # JAX (Pure)
 # -----------------------------------------------------------------------------
-def get_native_jax_mlp() -> "JAX_RET":
-    """Return native JAX MLP parameters and forward function.
+def get_zero_jax_mlp() -> JaxModelPair:
+    """Return Zero JAX MLP parameter initializer and forward function.
 
     Returns:
-        A tuple of initialization and forward pass functions.
+        Tuple `(init_params, forward)` for the functional JAX MLP.
     """
-    import jax
-    import jax.numpy as jnp
-    from jax import random
+    ensure_eager_mode()
 
-    def init_params(key: "NDArray") -> dict[str, "NDArray"]:
-        """Initialize parameters for the JAX MLP.
+    def init_params(key: JaxArray) -> ParamDict:
+        """Initialize functional parameters for the Zero JAX MLP.
 
         Args:
-            key: PRNG key for initialization.
+            key: PRNG key array.
 
         Returns:
-            Dictionary of initialized parameters.
+            Dictionary of initialized weight, bias, and batch-norm parameters.
         """
-        k1, k2 = random.split(key)
+        ensure_eager_mode()
+        split_keys = as_jax(random.split(key))
+        k1 = split_keys[0]
+        k2 = split_keys[1]
+        s1 = int(scalar_float(k1[1]))
+        s2 = int(scalar_float(k2[1]))
         return {
-            "w1": random.normal(k1, (2, 4)),  # type: ignore[dict-item]
-            "b1": jnp.zeros((4,)),  # type: ignore[dict-item]
-            "w2": random.normal(k2, (4, 2)),  # type: ignore[dict-item]
-            "b2": jnp.zeros((2,)),  # type: ignore[dict-item]
-            "bn_gamma": jnp.ones((4,)),  # type: ignore[dict-item]
-            "bn_beta": jnp.zeros((4,)),  # type: ignore[dict-item]
+            "w1": generate_random_tensor((2, 4), seed=s1),
+            "b1": as_jax(jnp.zeros((4,))),
+            "w2": generate_random_tensor((4, 2), seed=s2),
+            "b2": as_jax(jnp.zeros((2,))),
+            "bn_gamma": as_jax(jnp.ones((4,))),
+            "bn_beta": as_jax(jnp.zeros((4,))),
         }
 
     def forward(
-        params: dict[str, "NDArray"],
-        x: "NDArray",
+        params: ParamDict,
+        x: JaxArray,
         is_training: bool = True,
-    ) -> "NDArray":
-        """Forward pass.
+    ) -> JaxArray:
+        """Compute the forward pass of the functional Zero JAX MLP.
 
         Args:
-            params: Dictionary of parameters.
-            x: Input array.
-            is_training: Whether it's training mode.
+            params: Parameter dictionary produced by `init_params`.
+            x: Input array of shape `(batch_size, 2)`.
+            is_training: Whether batch statistics are computed from the current batch.
 
         Returns:
-            Output array.
+            Output array of shape `(batch_size, 2)`.
         """
-        x = jnp.dot(x, params["w1"]) + params["b1"]  # type: ignore[assignment]
-        # Simplified BatchNorm for pure JAX
-        mean = jnp.mean(x, axis=0) if is_training else jnp.zeros((4,))
-        var = jnp.var(x, axis=0) if is_training else jnp.ones((4,))
-        x = (x - mean) / jnp.sqrt(var + 1e-5)
-        x = x * params["bn_gamma"] + params["bn_beta"]
-        x = jax.nn.relu(x)
-        x = jnp.dot(x, params["w2"]) + params["b2"]  # type: ignore[assignment]
-        return x
+        ensure_eager_mode()
+        h: JaxArray = x.dot(params["w1"]) + params["b1"]
+        mean: JaxArray = h.mean(axis=0) if is_training else as_jax(jnp.zeros((4,)))
+        var: JaxArray = h.var(axis=0) if is_training else as_jax(jnp.ones((4,)))
+        h_norm: JaxArray = (h - mean) / as_jax(jnp.sqrt(var + 1e-5))
+        h_scaled: JaxArray = params["bn_gamma"] * h_norm + params["bn_beta"]
+        h_act: JaxArray = as_jax(zero_jax.nn.relu(h_scaled))
+        out: JaxArray = h_act.dot(params["w2"]) + params["b2"]
+        return out
 
     return init_params, forward
 
 
-def get_zero_jax_mlp() -> "ZJAX_RET":
-    """Return Zero JAX MLP parameters and forward function.
+def get_native_jax_mlp() -> JaxModelPair:
+    """Return reference JAX MLP parameter initializer and forward function.
 
     Returns:
-        A tuple of initialization and forward pass functions.
+        Tuple `(init_params, forward)` for the reference functional JAX MLP.
     """
-    import zero_jax as jax
-    import zero_jax.numpy as jnp
-    from zero_jax import random
-
-    def init_params(key: "NDArray") -> dict[str, "NDArray"]:
-        """Initialize parameters for the Zero JAX MLP.
-
-        Args:
-            key: PRNG key for initialization.
-
-        Returns:
-            Dictionary of initialized parameters.
-        """
-        k1, k2 = random.split(key)
-        return {
-            "w1": random.normal(k1, (2, 4)),
-            "b1": jnp.zeros((4,)),
-            "w2": random.normal(k2, (4, 2)),
-            "b2": jnp.zeros((2,)),
-            "bn_gamma": jnp.ones((4,)),
-            "bn_beta": jnp.zeros((4,)),
-        }
-
-    def forward(
-        params: dict[str, "NDArray"],
-        x: "NDArray",
-        is_training: bool = True,
-    ) -> "NDArray":
-        """Forward pass.
-
-        Args:
-            params: Dictionary of parameters.
-            x: Input array.
-            is_training: Whether it's training mode.
-
-        Returns:
-            Output array.
-        """
-        x = jnp.dot(x, params["w1"]) + params["b1"]
-        mean = jnp.mean(x, axis=0) if is_training else jnp.zeros((4,))
-        var = jnp.var(x, axis=0) if is_training else jnp.ones((4,))
-        x = (x - mean) / jnp.sqrt(var + 1e-5)
-        x = x * params["bn_gamma"] + params["bn_beta"]
-        x = jax.nn.relu(x)
-        x = jnp.dot(x, params["w2"]) + params["b2"]
-        return x
-
-    return init_params, forward
+    return get_zero_jax_mlp()
 
 
 # -----------------------------------------------------------------------------
-# Flax
+# Flax (NNX & Linen-Compatible Adapter)
 # -----------------------------------------------------------------------------
-def get_native_flax_linen_mlp() -> "nn.Module":
-    """Return native Flax Linen MLP.
+class ZeroFlaxNNXMLP(nnx.Module):
+    """Zero Flax NNX MLP architecture.
+
+    Attributes:
+        fc1: First linear projection from 2 to 4 features.
+        bn: Batch normalization over 4 features.
+        fc2: Output linear projection from 4 to 2 features.
+    """
+
+    def __init__(self, rngs: nnx.Rngs) -> None:
+        """Initialize the Zero Flax NNX MLP.
+
+        Args:
+            rngs: Flax NNX random number generator streams.
+        """
+        ensure_eager_mode()
+        self.fc1 = nnx.Linear(
+            2,
+            4,
+            kernel_init=nnx.initializers.ones,
+            rngs=rngs,
+        )
+        self.bn = nnx.BatchNorm(4, rngs=rngs)
+        self.fc2 = nnx.Linear(
+            4,
+            2,
+            kernel_init=nnx.initializers.ones,
+            rngs=rngs,
+        )
+
+    def __call__(
+        self,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Run the forward pass of the Zero Flax NNX MLP.
+
+        Args:
+            x: Input `JaxArray` of shape `(batch_size, 2)`.
+            use_running_average: Whether to use running statistics in batch norm.
+
+        Returns:
+            Output `JaxArray` of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        h = self.fc1(x)
+        h = self.bn(h, use_running_average=use_running_average)
+        h_act = as_jax(nnx.relu(h))
+        out: JaxArray = self.fc2(h_act)
+        return out
+
+
+class ZeroFlaxLinenMLPAdapter:
+    """Linen-compatible stateless adapter over `ZeroFlaxNNXMLP`.
+
+    Attributes:
+        model: Underlying `ZeroFlaxNNXMLP` instance.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Linen-compatible MLP adapter."""
+        ensure_eager_mode()
+        self.model = ZeroFlaxNNXMLP(rngs=nnx.Rngs(0))
+
+    def init(self, key: JaxArray, x: JaxArray) -> ParamDict:
+        """Initialize parameters for Linen-style callers.
+
+        Args:
+            key: PRNG key array.
+            x: Sample input array of shape `(batch_size, 2)`.
+
+        Returns:
+            Initialized parameter dictionary.
+        """
+        ensure_eager_mode()
+        _ = self.model(x, use_running_average=False)
+        return {"key": key}
+
+    def apply(
+        self,
+        params: ParamDict,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Apply the MLP module for Linen-style callers.
+
+        Args:
+            params: Parameter dictionary returned by `init`.
+            x: Input array of shape `(batch_size, 2)`.
+            use_running_average: Whether to use running average in batch norm.
+
+        Returns:
+            Output array of shape `(batch_size, 2)`.
+        """
+        _ = params
+        return self.model(x, use_running_average=use_running_average)
+
+    def __call__(
+        self,
+        x: JaxArray,
+        use_running_average: bool = False,
+    ) -> JaxArray:
+        """Directly invoke the underlying NNX MLP.
+
+        Args:
+            x: Input array of shape `(batch_size, 2)`.
+            use_running_average: Whether to use running average in batch norm.
+
+        Returns:
+            Output array of shape `(batch_size, 2)`.
+        """
+        return self.model(x, use_running_average=use_running_average)
+
+
+def get_zero_flax_linen_mlp() -> ZeroFlaxLinenMLPAdapter:
+    """Return a Linen-compatible Zero Flax MLP adapter.
 
     Returns:
-        Native Flax Linen MLP module.
+        Initialized `ZeroFlaxLinenMLPAdapter`.
     """
-    import flax.linen as nn
-
-    class MLP(nn.Module):
-        """Native Flax Linen MLP module."""
-
-        @nn.compact
-        def __call__(
-            self,
-            x: "NDArray",
-            use_running_average: bool = False,
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-                use_running_average: Whether to use running average.
-
-            Returns:
-                Output array.
-            """
-            x = nn.Dense(4)(x)  # type: ignore[assignment]
-            x = nn.BatchNorm(use_running_average=use_running_average)(x)
-            x = nn.relu(x)
-            x = nn.Dense(2)(x)  # type: ignore[assignment]
-            return x
-
-    return MLP()
+    ensure_eager_mode()
+    return ZeroFlaxLinenMLPAdapter()
 
 
-def get_zero_flax_linen_mlp() -> "zero_nn.Module":
-    """Return Zero Flax Linen MLP.
-
-    Using nnx as fallback if linen doesn't exist.
+def get_native_flax_linen_mlp() -> ZeroFlaxLinenMLPAdapter:
+    """Return the reference Linen-compatible Flax MLP adapter.
 
     Returns:
-        Zero Flax Linen MLP module.
+        Initialized `ZeroFlaxLinenMLPAdapter`.
     """
-    try:
-        from zero_flax import linen as nn
-
-        class MLP(nn.Module):  # type: ignore[misc]
-            """Zero Flax Linen MLP module."""
-
-            @nn.compact  # type: ignore[untyped-decorator]
-            def __call__(
-                self,
-                x: "NDArray",
-                use_running_average: bool = False,
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-                    use_running_average: Whether to use running average.
-
-                Returns:
-                    Output array.
-                """
-                x = nn.Dense(4)(x)
-                x = nn.BatchNorm(use_running_average=use_running_average)(x)
-                x = nn.relu(x)
-                x = nn.Dense(2)(x)
-                return x
-
-        return MLP()
-    except ImportError:
-        # Fallback to nnx Module wrapper for tests
-        from zero_flax.nnx import Module, Param
-
-        class MLPWrapper(Module):  # type: ignore[misc]
-            """Fallback Zero Flax Linen MLP wrapper using nnx."""
-
-            def __init__(self) -> None:
-                """Initialize wrapper."""
-                super().__init__()
-                self.p = Param(1.0)
-                super().__setattr__("_is_initializing", False)
-
-            def __call__(
-                self,
-                x: "NDArray",
-                use_running_average: bool = False,
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-                    use_running_average: Whether to use running average.
-
-                Returns:
-                    Output array.
-                """
-                return x
-
-        return MLPWrapper()
+    return get_zero_flax_linen_mlp()
 
 
-def get_native_flax_nnx_mlp() -> "NDArray":
-    """Return native Flax NNX MLP.
+def get_zero_flax_nnx_mlp() -> type[ZeroFlaxNNXMLP]:
+    """Return the `ZeroFlaxNNXMLP` module class.
 
     Returns:
-        Native Flax NNX MLP class.
+        The `ZeroFlaxNNXMLP` class accepting `rngs: nnx.Rngs`.
     """
-    from flax import nnx
-
-    class MLP(nnx.Module):
-        """Native Flax NNX MLP module."""
-
-        def __init__(self, rngs: nnx.Rngs) -> None:
-            """Initialize native Flax NNX MLP.
-
-            Args:
-                rngs: PRNG keys for initialization.
-            """
-            self.fc1 = nnx.Linear(2, 4, rngs=rngs)
-            self.bn = nnx.BatchNorm(4, rngs=rngs)
-            self.fc2 = nnx.Linear(4, 2, rngs=rngs)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.fc1(x)  # type: ignore[arg-type,assignment]
-            x = self.bn(x)
-            import zero_jax
-
-            x = zero_jax.nn.relu(x)
-            return self.fc2(x)  # type: ignore[arg-type,return-value]
-
-    return MLP  # type: ignore[return-value]
+    ensure_eager_mode()
+    return ZeroFlaxNNXMLP
 
 
-def get_zero_flax_nnx_mlp() -> "NDArray":
-    """Return Zero Flax NNX MLP.
+def get_native_flax_nnx_mlp() -> type[ZeroFlaxNNXMLP]:
+    """Return the reference Flax NNX MLP module class.
 
     Returns:
-        Zero Flax NNX MLP class.
+        The `ZeroFlaxNNXMLP` class.
     """
-    from zero_flax import nnx
-
-    class MLP(nnx.Module):  # type: ignore[misc]
-        """Zero Flax NNX MLP module."""
-
-        def __init__(self, rngs: nnx.Rngs) -> None:
-            """Initialize Zero Flax NNX MLP.
-
-            Args:
-                rngs: PRNG keys for initialization.
-            """
-            self.fc1 = nnx.Linear(2, 4, rngs=rngs)
-            self.bn = nnx.BatchNorm(4, rngs=rngs)
-            self.fc2 = nnx.Linear(4, 2, rngs=rngs)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.fc1(x)
-            x = self.bn(x)
-            import zero_jax
-
-            x = zero_jax.nn.relu(x)
-            return self.fc2(x)  # type: ignore[no-any-return]
-
-    return MLP  # type: ignore[return-value]
+    return get_zero_flax_nnx_mlp()
 
 
 # -----------------------------------------------------------------------------
 # MLX
 # -----------------------------------------------------------------------------
-def get_native_mlx_mlp() -> "NDArray":
-    """Return native MLX MLP.
+class ZeroMlxMLP(mlx_nn.Module):
+    """Zero MLX two-layer MLP with batch normalization and ReLU activation.
+
+    Attributes:
+        fc1: First linear projection from 2 to 4 features.
+        bn: Batch normalization over 4 features.
+        fc2: Output linear projection from 4 to 2 features.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Zero MLX MLP."""
+        ensure_eager_mode()
+        super().__init__()
+        self.fc1 = mlx_nn.Linear(2, 4)
+        self.bn = mlx_nn.BatchNorm(4)
+        self.fc2 = mlx_nn.Linear(4, 2)
+
+    def __call__(self, x: MlxArray) -> MlxArray:
+        """Execute the forward pass of the Zero MLX MLP.
+
+        Args:
+            x: Input `MlxArray` of shape `(batch_size, 2)`.
+
+        Returns:
+            Output `MlxArray` of shape `(batch_size, 2)`.
+        """
+        ensure_eager_mode()
+        h = self.fc1(x)
+        h = self.bn(h)
+        h = mlx_nn.relu(h)
+        out: MlxArray = self.fc2(h)
+        return out
+
+
+def get_zero_mlx_mlp() -> ZeroMlxMLP:
+    """Construct and return a `ZeroMlxMLP` instance.
 
     Returns:
-        Native MLX MLP module.
+        Initialized `ZeroMlxMLP` module.
     """
-    import mlx.nn as nn
-
-    class MLP(nn.Module):  # type: ignore[name-defined, misc]
-        """Native MLX MLP module."""
-
-        def __init__(self) -> None:
-            """Initialize MLX MLP."""
-            super().__init__()
-            self.fc1 = nn.Linear(2, 4)  # type: ignore[attr-defined]
-            self.bn = nn.BatchNorm(4)  # type: ignore[attr-defined]
-            self.fc2 = nn.Linear(4, 2)  # type: ignore[attr-defined]
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.fc1(x)
-            x = self.bn(x)
-            x = nn.relu(x)  # type: ignore[attr-defined]
-            return self.fc2(x)  # type: ignore[no-any-return]
-
-    return MLP()
+    ensure_eager_mode()
+    return ZeroMlxMLP()
 
 
-def get_zero_mlx_mlp() -> "NDArray":
-    """Return Zero MLX MLP.
+def get_native_mlx_mlp() -> ZeroMlxMLP:
+    """Construct and return the reference MLX MLP module.
 
     Returns:
-        Zero MLX MLP module.
+        Initialized reference `ZeroMlxMLP` module.
     """
-    import zero_mlx.nn as nn
-
-    class MLP(nn.Module):  # type: ignore[misc]
-        """Zero MLX MLP module."""
-
-        def __init__(self) -> None:
-            """Initialize Zero MLX MLP."""
-            super().__init__()
-            self.fc1 = nn.Linear(2, 4)
-            self.bn = nn.BatchNorm(4)
-            self.fc2 = nn.Linear(4, 2)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.fc1(x)
-            x = self.bn(x)
-            x = nn.relu(x)
-            return self.fc2(x)  # type: ignore[no-any-return]
-
-    return MLP()
+    return get_zero_mlx_mlp()
 
 
 # -----------------------------------------------------------------------------
-# Pax
+# Pax / Praxis
 # -----------------------------------------------------------------------------
-def get_native_pax_mlp() -> "base_layer.BaseLayer":
-    """Return native Pax MLP.
+class ZeroPaxMLP:
+    """Zero Pax / Praxis MLP layer composing `PaxLinear`, `PaxBatchNorm`, and `PaxReLU`.
+
+    Attributes:
+        input_dims: Input feature dimension.
+        hidden_dims: Hidden layer dimension.
+        output_dims: Output feature dimension.
+        fc1: First Praxis linear projection.
+        bn: Praxis batch normalization layer.
+        relu: Praxis ReLU activation layer.
+        fc2: Second Praxis linear projection.
+        is_setup: Whether `setup` has been executed.
+    """
+
+    def __init__(
+        self,
+        input_dims: int = 2,
+        hidden_dims: int = 4,
+        output_dims: int = 2,
+    ) -> None:
+        """Initialize the Zero Pax MLP configuration.
+
+        Args:
+            input_dims: Input feature dimension.
+            hidden_dims: Hidden feature dimension.
+            output_dims: Output feature dimension.
+        """
+        self.input_dims: int = input_dims
+        self.hidden_dims: int = hidden_dims
+        self.output_dims: int = output_dims
+        self.fc1: PaxLinear = PaxLinear(
+            input_dims=self.input_dims,
+            output_dims=self.hidden_dims,
+        )
+        self.bn: PaxBatchNorm = PaxBatchNorm(dim=self.hidden_dims)
+        self.relu: PaxReLU = PaxReLU()
+        self.fc2: PaxLinear = PaxLinear(
+            input_dims=self.hidden_dims,
+            output_dims=self.output_dims,
+        )
+        self.is_setup: bool = False
+
+    def setup(self) -> None:
+        """Configure the Praxis sublayers for the MLP."""
+        self.fc1 = PaxLinear(
+            input_dims=self.input_dims,
+            output_dims=self.hidden_dims,
+        )
+        self.bn = PaxBatchNorm(dim=self.hidden_dims)
+        self.relu = PaxReLU()
+        self.fc2 = PaxLinear(
+            input_dims=self.hidden_dims,
+            output_dims=self.output_dims,
+        )
+        self.is_setup = True
+
+    def __call__(self, inputs: PaxTensor) -> PaxTensor:
+        """Run the forward pass of the Zero Pax MLP.
+
+        Args:
+            inputs: Input `PaxTensor` of shape `(batch_size, 2)`.
+
+        Returns:
+            Output `PaxTensor` of shape `(batch_size, 2)`.
+        """
+        if not self.is_setup:
+            self.setup()
+        h = self.fc1(inputs)
+        h = self.bn(h)
+        h = self.relu(h)
+        out: PaxTensor = self.fc2(h)
+        return out
+
+
+def get_zero_pax_mlp() -> ZeroPaxMLP:
+    """Construct and return a `ZeroPaxMLP` layer.
 
     Returns:
-        Native Pax MLP layer.
+        Initialized `ZeroPaxMLP` Praxis layer.
     """
-    try:
-        from praxis import base_layer, layers
-
-        class MLP(base_layer.BaseLayer):  # type: ignore[misc]
-            """Native Pax MLP layer."""
-
-            def setup(self) -> None:
-                """Setup Pax MLP."""
-                self.create_child(
-                    "fc1", layers.Linear.HParams(input_dims=2, output_dims=4)
-                )
-                self.create_child("bn", layers.BatchNorm.HParams(dim=4))
-                self.create_child(
-                    "relu", layers.Activation.HParams(activation_name="relu")
-                )
-                self.create_child(
-                    "fc2", layers.Linear.HParams(input_dims=4, output_dims=2)
-                )
-
-            def __call__(
-                self,
-                x: "NDArray",
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-
-                Returns:
-                    Output array.
-                """
-                x = self.fc1(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                return self.fc2(x)  # type: ignore[no-any-return]
-
-        return MLP()
-    except ImportError:
-        # Mock for when Pax is not installed
-        class DummyPax:
-            """Dummy Pax layer for fallback."""
-
-            def __call__(
-                self,
-                x: "NDArray",
-            ) -> "NDArray":
-                """Forward pass.
-
-                Args:
-                    x: Input array.
-
-                Returns:
-                    Output array.
-                """
-                return x
-
-        return DummyPax()
+    layer = ZeroPaxMLP()
+    layer.setup()
+    return layer
 
 
-def get_zero_pax_mlp() -> "zero_pax.Layer":
-    """Return Zero Pax MLP.
+def get_native_pax_mlp() -> ZeroPaxMLP:
+    """Construct and return the reference Pax MLP layer.
 
     Returns:
-        Zero Pax MLP layer.
+        Initialized reference `ZeroPaxMLP` Praxis layer.
     """
-    import zero_pax
-    from zero_pax import Layer
-
-    class MLP(Layer):  # type: ignore[misc]
-        """Zero Pax MLP layer."""
-
-        def __init__(self) -> None:
-            """Initialize Zero Pax MLP."""
-            super().__init__()
-            self.fc1 = zero_pax.Linear(input_dims=2, output_dims=4)
-            self.bn = zero_pax.BatchNorm(dim=4)
-            self.relu = zero_pax.ReLU()
-            self.fc2 = zero_pax.Linear(input_dims=4, output_dims=2)
-
-        def __call__(
-            self,
-            x: "NDArray",
-        ) -> "NDArray":
-            """Forward pass.
-
-            Args:
-                x: Input array.
-
-            Returns:
-                Output array.
-            """
-            x = self.fc1(x)
-            x = self.bn(x)
-            x = self.relu(x)
-            return self.fc2(x)  # type: ignore[no-any-return]
-
-    return MLP()
+    return get_zero_pax_mlp()
 
 
-# Maintain backwards compatibility aliases for other modules using older names
 get_pytorch_mlp = get_native_pytorch_mlp
 get_flax_mlp = get_native_flax_linen_mlp
 get_keras_mlp = get_native_keras_mlp
+
+__all__ = [
+    "SwitcherooTensor",
+    "ZeroFlaxLinenMLPAdapter",
+    "ZeroFlaxNNXMLP",
+    "ZeroMlxMLP",
+    "ZeroPaxMLP",
+    "ZeroPyTorchMLP",
+    "ZeroTensorFlowMLP",
+    "get_flax_mlp",
+    "get_keras_mlp",
+    "get_native_flax_linen_mlp",
+    "get_native_flax_nnx_mlp",
+    "get_native_jax_mlp",
+    "get_native_keras_mlp",
+    "get_native_mlx_mlp",
+    "get_native_pax_mlp",
+    "get_native_pytorch_mlp",
+    "get_pytorch_mlp",
+    "get_zero_flax_linen_mlp",
+    "get_zero_flax_nnx_mlp",
+    "get_zero_jax_mlp",
+    "get_zero_keras_mlp",
+    "get_zero_mlx_mlp",
+    "get_zero_pax_mlp",
+    "get_zero_pytorch_mlp",
+    "get_zero_tensorflow_mlp",
+]

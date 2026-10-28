@@ -1,9 +1,6 @@
-"""Tests for MNIST."""
+"""Tests for MNIST training loops and determinism verification."""
 
-from typing import TYPE_CHECKING, TypeVar
-
-if TYPE_CHECKING:
-    pass
+from __future__ import annotations
 
 from zero_zoo.mnist import (
     t_mnist_edge_cases,
@@ -12,11 +9,9 @@ from zero_zoo.mnist import (
     verify_deterministic_training,
 )
 
-T = TypeVar("T")
-
 
 def test_mnist() -> None:
-    """Test MNIST functions."""
+    """Test MNIST MLP training, CNN training, edge cases, and determinism."""
     assert train_mnist_mlp()
     assert train_mnist_cnn()
     assert t_mnist_edge_cases()
